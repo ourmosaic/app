@@ -1,0 +1,348 @@
+package space.ourmosaic.app.i18n
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.russhwolf.settings.Settings
+import com.russhwolf.settings.set
+
+class I18nState(
+    private val systemLanguageTag: String,
+) {
+    private val settings = Settings()
+    private val LANGUAGE_KEY = "app_language"
+    private val FRONT_NOTIF_KEY = "show_front_notification"
+
+    private var _showFrontNotification by mutableStateOf(settings.getBoolean(FRONT_NOTIF_KEY, true))
+    var showFrontNotification: Boolean
+        get() = _showFrontNotification
+        set(value) {
+            _showFrontNotification = value
+            settings[FRONT_NOTIF_KEY] = value
+        }
+
+    private var _appLanguage by mutableStateOf(loadLanguage())
+    var appLanguage: AppLanguage
+        get() = _appLanguage
+        set(value) {
+            _appLanguage = value
+            settings[LANGUAGE_KEY] = value.name
+        }
+
+    private fun loadLanguage(): AppLanguage {
+        val saved = settings.getStringOrNull(LANGUAGE_KEY) ?: return AppLanguage.System
+        return try {
+            AppLanguage.valueOf(saved)
+        } catch (e: Exception) {
+            AppLanguage.System
+        }
+    }
+
+    val resolvedLanguage: ResolvedLanguage
+        get() = when (appLanguage) {
+            AppLanguage.French -> ResolvedLanguage.French
+            AppLanguage.English -> ResolvedLanguage.English
+            AppLanguage.System -> resolveSystemLanguage(systemLanguageTag)
+        }
+
+    fun text(key: MessageKey, vararg args: Any): String {
+        val template = when (resolvedLanguage) {
+            ResolvedLanguage.French -> frenchMessages[key]
+            ResolvedLanguage.English -> englishMessages[key]
+        } ?: englishMessages.getValue(key)
+
+        return formatTemplate(template, args)
+    }
+
+    private fun resolveSystemLanguage(languageTag: String): ResolvedLanguage {
+        return if (languageTag.lowercase().startsWith("fr")) {
+            ResolvedLanguage.French
+        } else {
+            ResolvedLanguage.English
+        }
+    }
+
+    private fun formatTemplate(template: String, args: Array<out Any>): String {
+        var value = template
+        args.forEach { arg ->
+            value = value.replaceFirst("%s", arg.toString())
+        }
+        return value
+    }
+}
+
+@Composable
+fun rememberI18nState(): I18nState {
+    val systemLanguageTag = remember { getSystemLanguageTag() }
+    return remember(systemLanguageTag) { I18nState(systemLanguageTag) }
+}
+
+private val englishMessages = mapOf(
+    MessageKey.HomeTitle to "Home",
+    MessageKey.HomeOpenProfile to "Open profile",
+    MessageKey.HomeOpenSettings to "Open settings",
+    MessageKey.HomeGreeting to "Running on %s",
+    MessageKey.ProfileTitle to "Profile",
+    MessageKey.SettingsTitle to "Settings",
+    MessageKey.CommonBack to "Back",
+    MessageKey.LanguageLabel to "Language",
+    MessageKey.LanguageSystem to "System",
+    MessageKey.LanguageFrench to "French",
+    MessageKey.LanguageEnglish to "English",
+    MessageKey.LoginTitle to "Login",
+    MessageKey.LoginUsername to "Username or Email",
+    MessageKey.LoginPassword to "Password",
+    MessageKey.LoginFederation to "Federation",
+    MessageKey.LoginButton to "Login",
+    MessageKey.RegisterButton to "Register",
+    MessageKey.LoginNoAccount to "Don't have an account? Register",
+    MessageKey.RegisterHasAccount to "Already have an account? Login",
+    MessageKey.LoginEmail to "Email",
+    MessageKey.LoginUsernameOnly to "Username",
+    MessageKey.ProfileSystemTitle to "System",
+    MessageKey.ProfileMembersTitle to "Fronting",
+    MessageKey.ProfileDescription to "Description",
+    MessageKey.ProfileSystemName to "System Name",
+    MessageKey.SystemTitle to "System",
+    MessageKey.SystemManageTitle to "Manage System",
+    MessageKey.MembersManageTitle to "Manage Members",
+    MessageKey.ProfileDescriptionLabel to "Description",
+    MessageKey.ProfileRoleLabel to "Role",
+    MessageKey.ProfilePronounsLabel to "Pronouns",
+    MessageKey.ProfileEdit to "Edit",
+    MessageKey.ProfileSave to "Save",
+    MessageKey.ProfileCancel to "Cancel",
+    MessageKey.ProfileNameLabel to "Name",
+    MessageKey.SystemColorLabel to "Color",
+    MessageKey.SystemDescriptionLabel to "Description",
+    MessageKey.MembersAdd to "Add Member",
+    MessageKey.MembersEmpty to "No members found.",
+    MessageKey.EditMember to "Edit Member",
+    MessageKey.LogoutButton to "Logout",
+    MessageKey.SettingsShowFrontNotification to "Show fronting notification",
+    MessageKey.SystemCustomFieldsTitle to "Custom Fields",
+    MessageKey.CustomFieldNameLabel to "Field Name",
+    MessageKey.CustomFieldTypeLabel to "Field Type",
+    MessageKey.CustomFieldOrderLabel to "Order",
+    MessageKey.CustomFieldPrivacyLabel to "Privacy",
+    MessageKey.CustomFieldAdd to "Add Custom Field",
+    MessageKey.CustomFieldEmpty to "No custom fields defined yet.",
+    MessageKey.CustomFieldDelete to "Delete Field",
+    MessageKey.CommonFolder to "Folder",
+    MessageKey.CommonRefresh to "Refresh",
+    MessageKey.CommonCancel to "Cancel",
+    MessageKey.CommonCreate to "Create",
+    MessageKey.CommonEdit to "Edit",
+    MessageKey.CommonDelete to "Delete",
+    MessageKey.CommonSave to "Save",
+    MessageKey.MembersFolderNew to "New Folder",
+    MessageKey.MembersFolderName to "Folder Name",
+    MessageKey.MembersFolderColor to "Folder Color",
+    MessageKey.MembersFolderEdit to "Edit Folder",
+    MessageKey.FrontManagementTitle to "Front Management",
+    MessageKey.FrontModeAdd to "Add to front",
+    MessageKey.FrontModeSet to "Set as front",
+    MessageKey.FrontModeLabelAdd to "Mode: Add to front",
+    MessageKey.FrontModeLabelSet to "Mode: Set as front",
+    MessageKey.FrontActive to "Fronting",
+    MessageKey.SetupSystemTitle to "System Setup",
+    MessageKey.SetupSystemDescription to "Mosaic allows you to manage your plurals system. Would you like to create one or import it from SimplyPlural?",
+    MessageKey.SetupCreateNew to "Create a new system",
+    MessageKey.SetupImportSimplyPlural to "Import from SimplyPlural",
+    MessageKey.SetupImportTitle to "SimplyPlural Import",
+    MessageKey.SetupImportDescription to "Enter your SimplyPlural API key to import your system, members, and fronting history.",
+    MessageKey.SetupApiKeyLabel to "SimplyPlural API Key",
+    MessageKey.SetupImportButton to "Import System",
+    MessageKey.SetupImportantNote to "Important: This choice is final for your system initialization. If you create a new system, you won't be able to import from SimplyPlural later.",
+    MessageKey.SetupImportingMessage to "Importing your system... This may take up to 20 minutes. You can stay on this screen or come back later.",
+    MessageKey.NotificationImportSuccessTitle to "Import Successful",
+    MessageKey.NotificationImportSuccessMessage to "Your system has been successfully imported.",
+    MessageKey.NotificationImportFailedTitle to "Import Failed",
+    MessageKey.NotificationImportFailedMessage to "The SimplyPlural import failed: %s",
+    MessageKey.SettingsClearCacheLabel to "Cache Management",
+    MessageKey.SettingsClearCacheButton to "Clear All Cache",
+    MessageKey.SettingsClearCacheSuccess to "Cache cleared successfully",
+    MessageKey.FriendsTitle to "Friends",
+    MessageKey.FriendsList to "Friends List",
+    MessageKey.FriendsRequests to "Friend Requests",
+    MessageKey.FriendsAdd to "Add Friend",
+    MessageKey.FriendsEmpty to "No friends yet.",
+    MessageKey.FriendsRequestsEmpty to "No pending requests.",
+    MessageKey.FriendsPending to "Pending",
+    MessageKey.FriendsAccept to "Accept",
+    MessageKey.FriendsRefuse to "Refuse",
+    MessageKey.FriendsRemove to "Remove Friend",
+    MessageKey.FriendsSearchPlaceholder to "Friend username...",
+    MessageKey.FriendsSendRequest to "Send Request",
+    MessageKey.FriendsOtherServer to "Other Server",
+    MessageKey.FriendsFederationLabel to "Federation URL",
+    MessageKey.FriendsRequestSentSuccess to "Friend request sent!",
+    MessageKey.FriendsRequestSentError to "Failed to send request: %s",
+    MessageKey.FriendsAcceptSuccess to "Friend request accepted!",
+    MessageKey.FriendsAcceptError to "Failed to accept request: %s",
+    MessageKey.FriendsRefuseSuccess to "Friend request refused.",
+    MessageKey.FriendsRefuseError to "Failed to refuse request: %s",
+    MessageKey.FriendsRemoveSuccess to "Friend removed.",
+    MessageKey.FriendsRemoveError to "Failed to remove friend: %s",
+    MessageKey.FriendsSentRequests to "Sent Requests",
+    MessageKey.FriendsCancel to "Cancel Request",
+    MessageKey.FriendsCancelSuccess to "Friend request cancelled.",
+    MessageKey.FriendsCancelError to "Failed to cancel request: %s",
+    MessageKey.FriendSharingMembersList to "Members list",
+    MessageKey.FriendMembersPrivateButFronting to "%s is fronting, but their member list is private.",
+    MessageKey.FriendMembersNotShared to "%s has not shared their member list with you.",
+    MessageKey.FriendSystemLabel to "System of %s",
+    MessageKey.MemberSince to "Since %s",
+    MessageKey.CommonSearch to "Search",
+    MessageKey.PrivacyPrivate to "Private",
+    MessageKey.PrivacyFriends to "Friends",
+    MessageKey.PrivacyPublic to "Public",
+    MessageKey.FriendPermissionsTitle to "Friendship Permissions",
+    MessageKey.FriendPermissionsOutboundSection to "What YOU share with them:",
+    MessageKey.FriendPermissionsInboundSection to "Your preferences:",
+    MessageKey.FriendPermissionViewFront to "Allow them to see who is fronting",
+    MessageKey.FriendPermissionViewMembers to "Allow them to see my members",
+    MessageKey.FriendPermissionReceiveNotifications to "Send them front notifications",
+    MessageKey.FriendPermissionNotifyMe to "Notify me on their front changes",
+    MessageKey.FriendSharingSettingsLabel to "Your sharing settings with this friend:",
+    MessageKey.FriendSharingFrontingStatus to "Fronting status shared",
+    MessageKey.FriendSharingMembersListStatus to "Members list shared",
+    MessageKey.FriendMembersPrivateButFronting to "%s is sharing their fronting status, but their member list is private.",
+    MessageKey.FriendMembersNotShared to "%s hasn't shared their members list with you.",
+)
+
+private val frenchMessages = mapOf(
+    MessageKey.HomeTitle to "Accueil",
+    MessageKey.HomeOpenProfile to "Aller au profil",
+    MessageKey.HomeOpenSettings to "Aller aux reglages",
+    MessageKey.HomeGreeting to "Actuellement sur %s",
+    MessageKey.ProfileTitle to "Profil",
+    MessageKey.SettingsTitle to "Reglages",
+    MessageKey.CommonBack to "Retour",
+    MessageKey.LanguageLabel to "Langue",
+    MessageKey.LanguageSystem to "Systeme",
+    MessageKey.LanguageFrench to "Francais",
+    MessageKey.LanguageEnglish to "Anglais",
+    MessageKey.LoginTitle to "Connexion",
+    MessageKey.LoginUsername to "Nom d'utilisateur ou Email",
+    MessageKey.LoginPassword to "Mot de passe",
+    MessageKey.LoginFederation to "Fédération",
+    MessageKey.LoginButton to "Se connecter",
+    MessageKey.RegisterButton to "S'inscrire",
+    MessageKey.LoginNoAccount to "Pas encore de compte ? S'inscrire",
+    MessageKey.RegisterHasAccount to "Déjà un compte ? Se connecter",
+    MessageKey.LoginEmail to "Email",
+    MessageKey.LoginUsernameOnly to "Nom d'utilisateur",
+    MessageKey.ProfileSystemTitle to "Système",
+    MessageKey.ProfileMembersTitle to "Front",
+    MessageKey.ProfileDescription to "Description",
+    MessageKey.ProfileSystemName to "Nom du système",
+    MessageKey.SystemTitle to "Système",
+    MessageKey.SystemManageTitle to "Gérer le Système",
+    MessageKey.MembersManageTitle to "Gérer les Membres",
+    MessageKey.ProfileDescriptionLabel to "Description",
+    MessageKey.ProfileRoleLabel to "Rôle",
+    MessageKey.ProfilePronounsLabel to "Pronoms",
+    MessageKey.ProfileEdit to "Modifier",
+    MessageKey.ProfileSave to "Enregistrer",
+    MessageKey.ProfileCancel to "Annuler",
+    MessageKey.ProfileNameLabel to "Nom",
+    MessageKey.SystemColorLabel to "Couleur",
+    MessageKey.SystemDescriptionLabel to "Description",
+    MessageKey.MembersAdd to "Ajouter un membre",
+    MessageKey.MembersEmpty to "Aucun membre trouvé.",
+    MessageKey.EditMember to "Modifier le membre",
+    MessageKey.LogoutButton to "Déconnexion",
+    MessageKey.SettingsShowFrontNotification to "Afficher la notification de front",
+    MessageKey.SystemCustomFieldsTitle to "Champs personnalisés",
+    MessageKey.CustomFieldNameLabel to "Nom du champ",
+    MessageKey.CustomFieldTypeLabel to "Type de champ",
+    MessageKey.CustomFieldOrderLabel to "Ordre",
+    MessageKey.CustomFieldPrivacyLabel to "Confidentialité",
+    MessageKey.CustomFieldAdd to "Ajouter un champ",
+    MessageKey.CustomFieldEmpty to "Aucun champ personnalisé défini.",
+    MessageKey.CustomFieldDelete to "Supprimer le champ",
+    MessageKey.CommonFolder to "Dossier",
+    MessageKey.CommonRefresh to "Rafraîchir",
+    MessageKey.CommonCancel to "Annuler",
+    MessageKey.CommonCreate to "Créer",
+    MessageKey.CommonEdit to "Modifier",
+    MessageKey.CommonDelete to "Supprimer",
+    MessageKey.CommonSave to "Enregistrer",
+    MessageKey.MembersFolderNew to "Nouveau dossier",
+    MessageKey.MembersFolderName to "Nom du dossier",
+    MessageKey.MembersFolderColor to "Couleur du dossier",
+    MessageKey.MembersFolderEdit to "Modifier le dossier",
+    MessageKey.FrontManagementTitle to "Gestion du front",
+    MessageKey.FrontModeAdd to "Ajouter au front",
+    MessageKey.FrontModeSet to "Définir comme front",
+    MessageKey.FrontModeLabelAdd to "Mode: Ajouter au front",
+    MessageKey.FrontModeLabelSet to "Mode: Définir comme front",
+    MessageKey.FrontActive to "Au front",
+    MessageKey.SetupSystemTitle to "Configuration du Système",
+    MessageKey.SetupSystemDescription to "Mosaic vous permet de gérer votre système pluriel. Souhaitez-vous en créer un ou l'importer depuis SimplyPlural ?",
+    MessageKey.SetupCreateNew to "Créer un nouveau système",
+    MessageKey.SetupImportSimplyPlural to "Importer depuis SimplyPlural",
+    MessageKey.SetupImportTitle to "Import SimplyPlural",
+    MessageKey.SetupImportDescription to "Entrez votre clé API SimplyPlural pour importer votre système, vos membres et votre historique de front.",
+    MessageKey.SetupApiKeyLabel to "Clé API SimplyPlural",
+    MessageKey.SetupImportButton to "Importer le système",
+    MessageKey.SetupImportantNote to "Important : Ce choix est définitif pour l'initialisation de votre système. Si vous créez un nouveau système, vous ne pourrez plus importer depuis SimplyPlural par la suite.",
+    MessageKey.SetupImportingMessage to "Importation de votre système... Cela peut prendre jusqu'à 20 minutes. Vous pouvez rester sur cet écran ou revenir plus tard.",
+    MessageKey.NotificationImportSuccessTitle to "Importation réussie",
+    MessageKey.NotificationImportSuccessMessage to "Votre système a été importé avec succès.",
+    MessageKey.NotificationImportFailedTitle to "Échec de l'importation",
+    MessageKey.NotificationImportFailedMessage to "L'importation SimplyPlural a échoué : %s",
+    MessageKey.SettingsClearCacheLabel to "Gestion du cache",
+    MessageKey.SettingsClearCacheButton to "Vider tout le cache",
+    MessageKey.SettingsClearCacheSuccess to "Cache vidé avec succès",
+    MessageKey.FriendsTitle to "Amis",
+    MessageKey.FriendsList to "Liste d'amis",
+    MessageKey.FriendsRequests to "Demandes d'amis",
+    MessageKey.FriendsAdd to "Ajouter un ami",
+    MessageKey.FriendsEmpty to "Aucun ami pour le moment.",
+    MessageKey.FriendsRequestsEmpty to "Aucune demande en attente.",
+    MessageKey.FriendsPending to "En attente",
+    MessageKey.FriendsAccept to "Accepter",
+    MessageKey.FriendsRefuse to "Refuser",
+    MessageKey.FriendsRemove to "Retirer de la liste",
+    MessageKey.FriendsSearchPlaceholder to "Nom d'utilisateur...",
+    MessageKey.FriendsSendRequest to "Envoyer la demande",
+    MessageKey.FriendsOtherServer to "Autre serveur",
+    MessageKey.FriendsFederationLabel to "URL de la fédération",
+    MessageKey.FriendsRequestSentSuccess to "Demande d'ami envoyée !",
+    MessageKey.FriendsRequestSentError to "Échec de l'envoi : %s",
+    MessageKey.FriendsAcceptSuccess to "Demande d'ami acceptée !",
+    MessageKey.FriendsAcceptError to "Échec de l'acceptation : %s",
+    MessageKey.FriendsRefuseSuccess to "Demande d'ami refusée.",
+    MessageKey.FriendsRefuseError to "Échec du refus : %s",
+    MessageKey.FriendsRemoveSuccess to "Ami retiré.",
+    MessageKey.FriendsRemoveError to "Échec du retrait : %s",
+    MessageKey.FriendsSentRequests to "Demandes envoyées",
+    MessageKey.FriendsCancel to "Annuler la demande",
+    MessageKey.FriendsCancelSuccess to "Demande d'ami annulée.",
+    MessageKey.FriendsCancelError to "Échec de l'annulation : %s",
+    MessageKey.FriendSharingMembersList to "Liste des membres",
+    MessageKey.FriendMembersPrivateButFronting to "%s est au front, mais sa liste de membres est privée.",
+    MessageKey.FriendMembersNotShared to "%s ne partage pas sa liste de membres avec vous.",
+    MessageKey.FriendSystemLabel to "Système de %s",
+    MessageKey.MemberSince to "Depuis %s",
+    MessageKey.CommonSearch to "Rechercher",
+    MessageKey.PrivacyPrivate to "Privé",
+    MessageKey.PrivacyFriends to "Amis",
+    MessageKey.PrivacyPublic to "Public",
+    MessageKey.FriendPermissionsTitle to "Permissions d'amitié",
+    MessageKey.FriendPermissionsOutboundSection to "Ce que VOUS partagez avec eux :",
+    MessageKey.FriendPermissionsInboundSection to "Vos préférences :",
+    MessageKey.FriendPermissionViewFront to "Leur permettre de voir qui est au front",
+    MessageKey.FriendPermissionViewMembers to "Leur permettre de voir mes membres",
+    MessageKey.FriendPermissionReceiveNotifications to "Leur envoyer des notifications de front",
+    MessageKey.FriendPermissionNotifyMe to "Me notifier de leurs changements de front",
+    MessageKey.FriendSharingSettingsLabel to "Vos paramètres de partage avec cet ami :",
+    MessageKey.FriendSharingFrontingStatus to "État du front partagé",
+    MessageKey.FriendSharingMembersListStatus to "Liste des membres partagée",
+    MessageKey.FriendMembersPrivateButFronting to "%s partage son état de front, mais sa liste de membres est privée.",
+    MessageKey.FriendMembersNotShared to "%s n'a pas partagé sa liste de membres avec vous.",
+)

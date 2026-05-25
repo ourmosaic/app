@@ -1,0 +1,11 @@
+<resources>
+    <string name="home_title">Home</string>
+    <string name="home_open_profile">Open profile</string>
+    <string name="home_open_settings">Open settings</string>
+
+    <string name="profile_title">Profile</string>
+    <string name="settings_title">Settings</string>
+
+    <string name="common_back">Back</string>
+</resources>
+

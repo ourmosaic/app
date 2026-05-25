@@ -1,0 +1,11 @@
+<resources>
+    <string name="home_title">Accueil</string>
+    <string name="home_open_profile">Aller au profil</string>
+    <string name="home_open_settings">Aller aux reglages</string>
+
+    <string name="profile_title">Profil</string>
+    <string name="settings_title">Reglages</string>
+
+    <string name="common_back">Retour</string>
+</resources>
+
