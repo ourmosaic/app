@@ -24,6 +24,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
       - name: Build iOS Framework (Kotlin)
         run: ./gradlew :composeApp:assembleComposeAppReleaseFrameworkIosSimulatorArm64
 
@@ -35,6 +38,7 @@ jobs:
                      -configuration Release \
                      -sdk iphonesimulator \
                      -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+                     -derivedDataPath build \
                      build \
                      CODE_SIGNING_ALLOWED=NO
 
