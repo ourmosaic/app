@@ -27,7 +27,7 @@ class SystemService(
 ) {
 
     fun generateId(type: PendingActionType): String {
-        return "${type.idPrefix}_${Clock.System.now().toEpochMilliseconds()}_${Random.nextInt(1000)}"
+        return "${type.idPrefix}_${space.ourmosaic.app.randomUUID()}"
     }
 
     val json = Json {

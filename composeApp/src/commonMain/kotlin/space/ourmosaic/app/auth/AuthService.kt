@@ -2,6 +2,8 @@ package space.ourmosaic.app.auth
 
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
+import space.ourmosaic.app.createSettings
+import space.ourmosaic.app.createEncryptedSettings
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -25,7 +27,8 @@ class AuthService {
         }
     }
 
-    private val settings = Settings()
+    private val settings = createSettings()
+    private val secureSettings = createEncryptedSettings()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val _userMe = MutableStateFlow<UserMeResponse?>(null)
@@ -200,8 +203,8 @@ class AuthService {
             }
         }
         
-        settings.remove("access_token")
-        settings.remove("refresh_token")
+        secureSettings.remove("access_token")
+        secureSettings.remove("refresh_token")
         settings.remove("federation")
         settings.remove("cached_user_me")
         settings.remove("cached_members")
@@ -214,13 +217,13 @@ class AuthService {
 
     private fun saveAuthData(federation: String, response: AuthenticationResponse) {
         settings["federation"] = federation
-        settings["access_token"] = response.accessToken
-        settings["refresh_token"] = response.refreshToken
+        secureSettings["access_token"] = response.accessToken
+        secureSettings["refresh_token"] = response.refreshToken
     }
 
     fun getFederation(): String? = settings.getStringOrNull("federation")
-    fun getAccessToken(): String? = settings.getStringOrNull("access_token")
-    fun getRefreshToken(): String? = settings.getStringOrNull("refresh_token")
+    fun getAccessToken(): String? = secureSettings.getStringOrNull("access_token")
+    fun getRefreshToken(): String? = secureSettings.getStringOrNull("refresh_token")
 
     suspend fun createSystem(): Result<Unit> {
         val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))

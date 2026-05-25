@@ -31,6 +31,11 @@ import kotlinx.serialization.json.JsonObject
 @Composable
 fun App(initialTargetRoute: String? = null) {
     val authService = remember { AuthService() }
+    val offlineManager = remember { OfflineManager() }
+    val systemService = remember { SystemService(authService, offlineManager) }
+    val syncWorker = remember { SyncWorker(systemService, offlineManager, authService) }
+    val sseService = remember { SseService(authService) }
+
     val startRoute = if (authService.getAccessToken() != null) Route.Home else Route.Login
     
     val kamelConfig = remember {
@@ -47,136 +52,18 @@ fun App(initialTargetRoute: String? = null) {
         CompositionLocalProvider(LocalKamelConfig provides kamelConfig) {
             val i18nState = rememberI18nState()
             val navState = rememberNavState(startRoute)
-            val offlineManager = remember { OfflineManager() }
-            val systemService = remember { SystemService(authService, offlineManager) }
-            val syncWorker = remember { SyncWorker(systemService, offlineManager, authService) }
-            val sseService = remember { SseService(authService) }
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val scope = rememberCoroutineScope()
             val isLoggedOut = navState.currentRoute == Route.Login
             
+            val appController = remember {
+                AppController(authService, offlineManager, systemService, syncWorker, sseService)
+            }
+
             val userMe by offlineManager.cachedUserMe.collectAsState(authService.userMe.value)
 
-            // Sync authService userMe to offlineManager for optimistic UI
-            LaunchedEffect(authService.userMe.value) {
-                authService.userMe.value?.let { offlineManager.cacheUserMe(it) }
-            }
-
-            // Sync loop
-            LaunchedEffect(isLoggedOut) {
-                if (!isLoggedOut && authService.getAccessToken() != null) {
-                    syncWorker.start(this)
-                } else {
-                    syncWorker.stop()
-                }
-            }
-
-            // Rafraîchir les infos utilisateur au démarrage ou au login
-            LaunchedEffect(isLoggedOut) {
-                if (!isLoggedOut && authService.getAccessToken() != null) {
-                    authService.getUserMe()
-                }
-            }
-
-            // Gérer le cycle de vie du streaming SSE
-            val hasSystem = userMe?.system != null
-            LaunchedEffect(isLoggedOut, hasSystem) {
-                if (!isLoggedOut) {
-                    val token = authService.getAccessToken()
-                    if (token != null) {
-                        // Background service is disabled to avoid annoying notification
-                        // startSseBackgroundService()
-                        sseService.startStreaming(this)
-                    }
-                } else {
-                    stopSseBackgroundService()
-                    sseService.stopStreaming()
-                }
-            }
-
-            LaunchedEffect(sseService.events) {
-                sseService.events.collect { event ->
-                    Logger.d("App", "SSE Event received: topic=${event.topic}, payload=${event.payload}")
-                    when (event.topic) {
-                        SseTopics.FRONT_SESSIONS, SseTopics.FEDERATION_FRONT_SESSIONS, SseTopics.FRONT_CHANGES -> {
-                            // Refresh fronting status
-                            systemService.getActiveFrontSessions()
-                            systemService.getFriends() // Friends' fronting might have changed
-                        }
-                        SseTopics.FRIEND_FRONT_SESSIONS -> {
-                            try {
-                                val jsonPayload = event.payload as? JsonObject
-                                if (jsonPayload != null && jsonPayload.containsKey("event")) {
-                                    val payload = systemService.json.decodeFromJsonElement<FriendFrontEventPayload>(event.payload)
-                                    val friendName = payload.friend.customName ?: payload.friend.username ?: "Friend"
-                                    val memberNames = payload.activeMembers.joinToString(", ") { it.name }
-                                    
-                                    if (memberNames.isNotEmpty()) {
-                                        val body = "${i18nState.text(MessageKey.FrontActive)}: $memberNames"
-                                        // Use a stable ID based on friend's system ID hash to update the same notification
-                                        val notificationId = payload.friend.systemId.hashCode()
-                                        showSimpleNotification(friendName, body, notificationId)
-                                    }
-                                    
-                                    // Also refresh data
-                                    systemService.getFriends()
-                                }
-                            } catch (e: Exception) {
-                                Logger.e("App", "Error decoding friend front event", e)
-                            }
-                        }
-                        SseTopics.FRIENDSHIP -> {
-                            // Refresh friends list and requests
-                            systemService.getFriends()
-                            systemService.getReceivedFriendRequests()
-                            systemService.getSentFriendRequests()
-                        }
-                        SseTopics.IMPORT -> {
-                            try {
-                                val payload = systemService.json.decodeFromJsonElement<ImportEventPayload>(event.payload)
-                                Logger.d("App", "Import event: ${payload.event}")
-                                
-                                if (payload.event == ImportEvents.COMPLETED) {
-                                    offlineManager.setImporting(false)
-                                    authService.getUserMe()
-                                    systemService.getMembers()
-                                    showSimpleNotification(
-                                        i18nState.text(MessageKey.NotificationImportSuccessTitle),
-                                        i18nState.text(MessageKey.NotificationImportSuccessMessage)
-                                    )
-                                } else if (payload.event == ImportEvents.FAILED) {
-                                    offlineManager.setImporting(false)
-                                    showSimpleNotification(
-                                        i18nState.text(MessageKey.NotificationImportFailedTitle),
-                                        i18nState.text(MessageKey.NotificationImportFailedMessage, payload.error ?: "")
-                                    )
-                                }
-                            } catch (e: Exception) {
-                                Logger.e("App", "Error decoding import event", e)
-                            }
-                        }
-                    }
-                }
-            }
-
-            LaunchedEffect(i18nState.showFrontNotification) {
-                val activeSessionsFlow = offlineManager.cachedFrontSessions
-                val membersFlow = offlineManager.cachedMembers
-                
-                combine(activeSessionsFlow, membersFlow) { sessions, members ->
-                    if (i18nState.showFrontNotification && authService.getAccessToken() != null) {
-                        val active = sessions?.filter { it.endTime == null } ?: emptyList()
-                        val m = members ?: emptyList()
-                        val fronters = active.map { session ->
-                            session.member?.name 
-                                ?: m.find { it.id == session.memberId }?.name 
-                                ?: session.memberId 
-                        }
-                        updateFrontNotification(fronters)
-                    } else {
-                        updateFrontNotification(emptyList())
-                    }
-                }.collect { }
+            LaunchedEffect(Unit) {
+                appController.start(this, i18nState)
             }
 
             LaunchedEffect(initialTargetRoute) {

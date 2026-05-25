@@ -191,8 +191,10 @@ class SyncWorker(
                         
                         val isPermanentError = msg.contains("400") || msg.contains("401") || 
                                                msg.contains("403") || msg.contains("404") || 
+                                               msg.contains("405") || msg.contains("422") ||
                                                msg.contains("409") || msg.contains("Conflict") ||
-                                               msg.contains("500")
+                                               msg.contains("500") || msg.contains("501")
+
                         
                         if (isPermanentError) {
                             Logger.w(TAG, "Permanent error detected, discarding action.")
