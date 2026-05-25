@@ -28,7 +28,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build iOS Framework (Kotlin)
-        run: ./gradlew :composeApp:assembleComposeAppReleaseFrameworkIosSimulatorArm64
+        run: ./gradlew :composeApp:linkReleaseFrameworkIosSimulatorArm64
 
       - name: Build Xcode Project (Simulator)
         run: |
