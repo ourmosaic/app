@@ -72,6 +72,7 @@ fun App(initialTargetRoute: String? = null) {
     ) {
         CompositionLocalProvider(LocalKamelConfig provides kamelConfig) {
             val i18nState = rememberI18nState()
+            val appSettings = remember { AppSettings() }
             val navState = rememberNavState(startRoute)
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val scope = rememberCoroutineScope()
@@ -84,7 +85,7 @@ fun App(initialTargetRoute: String? = null) {
             val userMe by offlineManager.cachedUserMe.collectAsState(authService.userMe.value)
 
             LaunchedEffect(Unit) {
-                appController.start(this, i18nState)
+                appController.start(this, i18nState, appSettings)
             }
 
             LaunchedEffect(initialTargetRoute) {
@@ -131,6 +132,7 @@ fun App(initialTargetRoute: String? = null) {
                     AppRouter(
                         navState = navState,
                         i18n = i18nState,
+                        appSettings = appSettings,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onLogout = { navState.navigateTo(Route.Login) },
                         systemService = systemService,

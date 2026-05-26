@@ -27,6 +27,7 @@ import space.ourmosaic.app.screens.SystemScreen
 import space.ourmosaic.app.screens.MembersManageScreen
 import space.ourmosaic.app.screens.MemberEditScreen
 import space.ourmosaic.app.screens.SetupSystemScreen
+import space.ourmosaic.app.system.AppSettings
 import space.ourmosaic.app.system.SseService
 import space.ourmosaic.app.system.SystemService
 import space.ourmosaic.app.system.SyncWorker
@@ -38,6 +39,7 @@ import space.ourmosaic.app.utils.rememberConnectivityObserver
 fun AppRouter(
     navState: NavState,
     i18n: I18nState,
+    appSettings: AppSettings,
     onOpenDrawer: () -> Unit,
     onLogout: () -> Unit,
     systemService: SystemService,
@@ -109,6 +111,7 @@ fun AppRouter(
 
         Route.MembersManage -> MembersManageScreen(
             i18n = i18n,
+            appSettings = appSettings,
             onBack = navState::back,
             onEditMember = { id -> navState.navigateTo(Route.MemberEdit(id)) },
             offlineManager = offlineManager,
@@ -127,6 +130,7 @@ fun AppRouter(
 
         Route.Settings -> SettingsScreen(
             i18n = i18n,
+            appSettings = appSettings,
             onOpenDrawer = onOpenDrawer,
             onLogout = onLogout,
             offlineManager = offlineManager,

@@ -41,6 +41,7 @@ enum class FrontMode {
 @Composable
 fun MembersManageScreen(
     i18n: I18nState,
+    appSettings: AppSettings,
     onBack: () -> Unit,
     onEditMember: (String) -> Unit,
     offlineManager: OfflineManager,
@@ -86,6 +87,12 @@ fun MembersManageScreen(
             membersList
         } else {
             membersList.filter { m -> m.groups.any { it.groupId == currentGroupId } }
+        }.let { list ->
+            if (appSettings.hideDormantMembers) {
+                list.filter { !it.inDormancy }
+            } else {
+                list
+            }
         }
         filtered.sortedBy { it.name.lowercase() }
     }
@@ -114,7 +121,7 @@ fun MembersManageScreen(
             sessionsList.any { it.memberId == m.id && it.endTime == null } 
         }.map { it.name }
         
-        if (i18n.showFrontNotification) {
+        if (appSettings.showFrontNotification) {
             updateFrontNotification(fronterNames)
         } else {
             updateFrontNotification(emptyList())

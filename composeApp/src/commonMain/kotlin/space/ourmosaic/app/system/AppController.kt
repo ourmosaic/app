@@ -24,7 +24,7 @@ class AppController(
     private var sseJob: Job? = null
     private var notificationJob: Job? = null
 
-    fun start(scope: CoroutineScope, i18nState: I18nState) {
+    fun start(scope: CoroutineScope, i18nState: I18nState, appSettings: AppSettings) {
         controllerScope = scope
 
         scope.launch {
@@ -57,7 +57,7 @@ class AppController(
 
         scope.launch {
             combine(offlineManager.cachedFrontSessions, offlineManager.cachedMembers) { sessions, members ->
-                if (i18nState.showFrontNotification && authService.getAccessToken() != null) {
+                if (appSettings.showFrontNotification && authService.getAccessToken() != null) {
                     val active = sessions?.filter { it.endTime == null } ?: emptyList()
                     val m = members ?: emptyList()
                     val fronters = active.map { session ->

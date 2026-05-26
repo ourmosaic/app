@@ -21,12 +21,14 @@ import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.AppLanguage
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
+import space.ourmosaic.app.system.AppSettings
 import space.ourmosaic.app.system.requestNotificationPermission
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     i18n: I18nState,
+    appSettings: AppSettings,
     onOpenDrawer: () -> Unit,
     onLogout: () -> Unit,
     offlineManager: space.ourmosaic.app.offline.OfflineManager,
@@ -79,6 +81,23 @@ fun SettingsScreen(
                 )
                 
                 ThemeRadioGroup(i18n = i18n, currentTheme = theme, onThemeChange = onThemeChange)
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = i18n.text(MessageKey.SettingsHideDormantMembers),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Switch(
+                        checked = appSettings.hideDormantMembers,
+                        onCheckedChange = { appSettings.hideDormantMembers = it }
+                    )
+                }
             }
 
             // Section Notifications
@@ -99,9 +118,9 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Switch(
-                        checked = i18n.showFrontNotification,
+                        checked = appSettings.showFrontNotification,
                         onCheckedChange = { 
-                            i18n.showFrontNotification = it
+                            appSettings.showFrontNotification = it
                             if (it) {
                                 requestNotificationPermission()
                             }

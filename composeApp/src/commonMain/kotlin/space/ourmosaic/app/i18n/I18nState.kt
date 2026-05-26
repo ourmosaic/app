@@ -6,29 +6,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.russhwolf.settings.Settings
-import com.russhwolf.settings.set
 
 class I18nState(
     private val systemLanguageTag: String,
 ) {
     private val settings = Settings()
     private val LANGUAGE_KEY = "app_language"
-    private val FRONT_NOTIF_KEY = "show_front_notification"
-
-    private var _showFrontNotification by mutableStateOf(settings.getBoolean(FRONT_NOTIF_KEY, true))
-    var showFrontNotification: Boolean
-        get() = _showFrontNotification
-        set(value) {
-            _showFrontNotification = value
-            settings[FRONT_NOTIF_KEY] = value
-        }
 
     private var _appLanguage by mutableStateOf(loadLanguage())
     var appLanguage: AppLanguage
         get() = _appLanguage
         set(value) {
             _appLanguage = value
-            settings[LANGUAGE_KEY] = value.name
+            settings.putString(LANGUAGE_KEY, value.name)
         }
 
     private fun loadLanguage(): AppLanguage {
@@ -239,6 +229,7 @@ private val englishMessages = mapOf(
     MessageKey.ThemeSystem to "System",
     MessageKey.ThemeLight to "Light",
     MessageKey.ThemeDark to "Dark",
+    MessageKey.SettingsHideDormantMembers to "Hide dormant members",
 )
 
 private val frenchMessages = mapOf(
@@ -401,4 +392,5 @@ private val frenchMessages = mapOf(
     MessageKey.ThemeSystem to "Système",
     MessageKey.ThemeLight to "Clair",
     MessageKey.ThemeDark to "Sombre",
+    MessageKey.SettingsHideDormantMembers to "Masquer les membres en dormance",
 )

@@ -169,5 +169,6 @@ enum class MessageKey {
     ThemeSystem,
     ThemeLight,
     ThemeDark,
+    SettingsHideDormantMembers,
 }
 
