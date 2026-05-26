@@ -98,6 +98,21 @@ fun SettingsScreen(
                         onCheckedChange = { appSettings.hideDormantMembers = it }
                     )
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = i18n.text(MessageKey.SettingsHideMembersInFoldersAtRoot),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Switch(
+                        checked = appSettings.hideMembersInFoldersAtRoot,
+                        onCheckedChange = { appSettings.hideMembersInFoldersAtRoot = it }
+                    )
+                }
             }
 
             // Section Notifications

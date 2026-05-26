@@ -84,7 +84,11 @@ fun MembersManageScreen(
         val filtered = if (isSearchActive && searchQuery.isNotBlank()) {
             membersList.filter { it.name.contains(searchQuery, ignoreCase = true) || it.pronouns?.contains(searchQuery, ignoreCase = true) == true }
         } else if (currentGroupId == null) {
-            membersList
+            if (appSettings.hideMembersInFoldersAtRoot) {
+                membersList.filter { it.groups.isEmpty() }
+            } else {
+                membersList
+            }
         } else {
             membersList.filter { m -> m.groups.any { it.groupId == currentGroupId } }
         }.let { list ->

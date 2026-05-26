@@ -170,5 +170,6 @@ enum class MessageKey {
     ThemeLight,
     ThemeDark,
     SettingsHideDormantMembers,
+    SettingsHideMembersInFoldersAtRoot,
 }
 

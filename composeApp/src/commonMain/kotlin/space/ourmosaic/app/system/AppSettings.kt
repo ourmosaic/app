@@ -11,6 +11,7 @@ class AppSettings {
     
     private val HIDE_DORMANT_KEY = "hide_dormant_members"
     private val FRONT_NOTIF_KEY = "show_front_notification"
+    private val HIDE_IN_FOLDERS_KEY = "hide_members_in_folders_at_root"
 
     private var _hideDormantMembers by mutableStateOf(settings.getBoolean(HIDE_DORMANT_KEY, false))
     var hideDormantMembers: Boolean
@@ -26,5 +27,13 @@ class AppSettings {
         set(value) {
             _showFrontNotification = value
             settings[FRONT_NOTIF_KEY] = value
+        }
+
+    private var _hideMembersInFoldersAtRoot by mutableStateOf(settings.getBoolean(HIDE_IN_FOLDERS_KEY, false))
+    var hideMembersInFoldersAtRoot: Boolean
+        get() = _hideMembersInFoldersAtRoot
+        set(value) {
+            _hideMembersInFoldersAtRoot = value
+            settings[HIDE_IN_FOLDERS_KEY] = value
         }
 }

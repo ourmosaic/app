@@ -230,6 +230,7 @@ private val englishMessages = mapOf(
     MessageKey.ThemeLight to "Light",
     MessageKey.ThemeDark to "Dark",
     MessageKey.SettingsHideDormantMembers to "Hide dormant members",
+    MessageKey.SettingsHideMembersInFoldersAtRoot to "Hide members that are in folders at root",
 )
 
 private val frenchMessages = mapOf(
@@ -393,4 +394,5 @@ private val frenchMessages = mapOf(
     MessageKey.ThemeLight to "Clair",
     MessageKey.ThemeDark to "Sombre",
     MessageKey.SettingsHideDormantMembers to "Masquer les membres en dormance",
+    MessageKey.SettingsHideMembersInFoldersAtRoot to "Masquer les membres classés à la racine",
 )
