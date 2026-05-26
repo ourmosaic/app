@@ -26,9 +26,10 @@ sealed class Route(val icon: ImageVector, val titleKey: MessageKey) {
     data class FriendSystem(val friendId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data class MemberDetail(val memberId: String) : Route(Icons.Default.AccountCircle, MessageKey.ProfileTitle)
     data class FriendMemberDetail(val friendId: String, val memberId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
+    data object BlockedEntities : Route(Icons.Default.Lock, MessageKey.SafetyBlockedEntities)
 
     companion object {
-        val all get() = listOf(Home, Profile, Friends, System, MembersManage, Settings)
+        val all get() = listOf(Home, Profile, Friends, System, MembersManage, Settings, BlockedEntities)
     }
 }
 

@@ -116,6 +116,7 @@ fun MemberEditScreen(
     var name by remember { mutableStateOf("") }
     var pronouns by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var inDormancy by remember { mutableStateOf(false) }
     var role by remember { mutableStateOf("") }
     var colorHex by remember { mutableStateOf("") }
     var privacy by remember { mutableStateOf(PrivacyLevel.PRIVATE) }
@@ -158,6 +159,7 @@ fun MemberEditScreen(
                 name = m.name
                 pronouns = m.pronouns ?: ""
                 description = m.description ?: ""
+                inDormancy = m.inDormancy
                 role = m.role ?: ""
                 colorHex = m.color ?: ""
                 privacy = m.privacy
@@ -195,7 +197,8 @@ fun MemberEditScreen(
                                     description = description.ifBlank { null },
                                     role = role.ifBlank { null },
                                     color = colorHex.ifBlank { null },
-                                    privacy = privacy
+                                    privacy = privacy,
+                                    inDormancy = inDormancy
                                 )
                                 val updateRes = systemService.updateMember(memberId, updateDto)
                                 
@@ -312,6 +315,21 @@ fun MemberEditScreen(
                     label = { Text(i18n.text(MessageKey.ProfileRoleLabel)) },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { inDormancy = !inDormancy }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(i18n.text(MessageKey.MemberDormancyLabel))
+                    Switch(
+                        checked = inDormancy,
+                        onCheckedChange = { inDormancy = it }
+                    )
+                }
 
                 OutlinedTextField(
                     value = description,
@@ -516,6 +534,63 @@ fun MemberEditScreen(
                             )
                         }
                     }
+                }
+
+                HorizontalDivider()
+
+                // Delete Button
+                var showDeleteConfirm by remember { mutableStateOf(false) }
+                OutlinedButton(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Default.Close, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(i18n.text(MessageKey.CommonDelete))
+                }
+
+                if (showDeleteConfirm) {
+                    var deleteTapCount by remember { mutableIntStateOf(0) }
+                    AlertDialog(
+                        onDismissRequest = { showDeleteConfirm = false },
+                        title = { Text(i18n.text(MessageKey.DeleteMemberConfirmTitle)) },
+                        text = {
+                            Column {
+                                Text(i18n.text(MessageKey.DeleteMemberConfirmText))
+                                if (deleteTapCount > 0) {
+                                    LinearProgressIndicator(
+                                        progress = { deleteTapCount / 5f },
+                                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    deleteTapCount++
+                                    if (deleteTapCount >= 5) {
+                                        scope.launch {
+                                            systemService.deleteMember(memberId)
+                                            onBack()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (deleteTapCount >= 4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Text(if (deleteTapCount >= 4) i18n.text(MessageKey.DeleteMemberConfirmAction) else "${5 - deleteTapCount}...")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteConfirm = false }) {
+                                Text(i18n.text(MessageKey.CommonCancel))
+                            }
+                        }
+                    )
                 }
             }
         }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.*
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.offline.OfflineManager
+import space.ourmosaic.app.screens.BlockedEntitiesScreen
 import space.ourmosaic.app.screens.FriendSystemScreen
 import space.ourmosaic.app.screens.FriendMemberDetailScreen
 import space.ourmosaic.app.screens.FriendsScreen
@@ -43,7 +44,9 @@ fun AppRouter(
     sseService: SseService,
     offlineManager: OfflineManager,
     authService: AuthService,
-    syncWorker: SyncWorker
+    syncWorker: SyncWorker,
+    theme: space.ourmosaic.app.AppTheme,
+    onThemeChange: (space.ourmosaic.app.AppTheme) -> Unit
 ) {
     val connectivityObserver = rememberConnectivityObserver()
 
@@ -128,7 +131,16 @@ fun AppRouter(
             onLogout = onLogout,
             offlineManager = offlineManager,
             systemService = systemService,
-            authService = authService
+            authService = authService,
+            onNavigate = { route -> navState.navigateTo(route) },
+            theme = theme,
+            onThemeChange = onThemeChange
+        )
+
+        Route.BlockedEntities -> BlockedEntitiesScreen(
+            i18n = i18n,
+            onBack = navState::back,
+            systemService = systemService
         )
 
         Route.SetupSystem -> SetupSystemScreen(
@@ -191,7 +203,8 @@ fun AppRouter(
                         i18n = i18n,
                         onBack = navState::back,
                         onEdit = { id -> navState.navigateTo(Route.MemberEdit(id)) },
-                        authService = authService
+                        authService = authService,
+                        systemService = systemService
                     )
                 }
             }
@@ -223,7 +236,8 @@ fun AppRouter(
                         i18n = i18n,
                         onBack = navState::back,
                         onEdit = { id -> navState.navigateTo(Route.MemberEdit(id)) },
-                        authService = authService
+                        authService = authService,
+                        systemService = systemService
                     )
                 }
             }

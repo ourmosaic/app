@@ -203,13 +203,57 @@ class SystemService(
                     pronouns = dto.pronouns,
                     color = dto.color,
                     privacy = dto.privacy ?: PrivacyLevel.PRIVATE,
-                    inDormancy = false,
+                    inDormancy = dto.inDormancy,
                     systemId = settings.getStringOrNull("system_id") ?: "",
                     createdAt = Clock.System.now().toString(),
                     updatedAt = Clock.System.now().toString()
                 ))
             } else Result.failure(e)
         }
+    }
+
+    suspend fun deleteMember(memberId: String, fromSync: Boolean = false): Result<Unit> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/v1/system/@me/members/$memberId"
+        
+        val actionId = if (!fromSync) generateId(PendingActionType.DELETE_MEMBER) else null
+        if (actionId != null) {
+            offlineManager.queueAction(
+                PendingAction(
+                    id = actionId,
+                    type = PendingActionType.DELETE_MEMBER,
+                    memberId = memberId,
+                    jsonPayload = "{}",
+                    timestamp = Clock.System.now().toEpochMilliseconds()
+                )
+            )
+        }
+
+        return try {
+            val response = client.delete(url) {
+                getHeaders(this)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return deleteMember(memberId, fromSync)
+            }
+            if (response.status.isSuccess()) {
+                if (actionId != null) offlineManager.removeAction(actionId)
+                removeMemberFromCache(memberId)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Failed to delete member: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            if (actionId != null) {
+                removeMemberFromCache(memberId)
+                Result.success(Unit)
+            } else Result.failure(e)
+        }
+    }
+
+    private fun removeMemberFromCache(memberId: String) {
+        val current = offlineManager.getCachedMembers() ?: return
+        offlineManager.cacheMembers(current.filter { it.id != memberId })
     }
 
     private fun updateMemberCacheOptimistically(member: MemberResponse) {
@@ -267,6 +311,7 @@ class SystemService(
                     pronouns = dto.pronouns ?: current.pronouns,
                     description = dto.description ?: current.description,
                     color = dto.color ?: current.color,
+                    inDormancy = dto.inDormancy ?: current.inDormancy,
                     privacy = dto.privacy ?: current.privacy
                 ) ?: MemberResponse(
                     id = memberId, 
@@ -274,7 +319,7 @@ class SystemService(
                     systemId = "", 
                     createdAt = "", 
                     updatedAt = "",
-                    inDormancy = false,
+                    inDormancy = dto.inDormancy ?: false,
                     privacy = PrivacyLevel.PRIVATE
                 )
                 updateMemberCacheOptimistically(dummy)
@@ -1491,6 +1536,129 @@ class SystemService(
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Failed to remove friend: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun reportEntity(dto: ReportRequest): Result<ReportResponse> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/report"
+        return try {
+            val response = client.post(url) {
+                getHeaders(this)
+                contentType(ContentType.Application.Json)
+                setBody(dto)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return reportEntity(dto)
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Failed to report entity: ${response.status} - $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun blockEntity(dto: BlockRequest): Result<Unit> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/block"
+        return try {
+            val response = client.post(url) {
+                getHeaders(this)
+                contentType(ContentType.Application.Json)
+                setBody(dto)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return blockEntity(dto)
+            }
+            if (response.status.isSuccess()) {
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Failed to block entity: ${response.status} - $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun unblockEntity(dto: UnblockRequest): Result<Unit> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/unblock"
+        return try {
+            val response = client.delete(url) {
+                getHeaders(this)
+                contentType(ContentType.Application.Json)
+                setBody(dto)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return unblockEntity(dto)
+            }
+            if (response.status.isSuccess()) {
+                Result.success(Unit)
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Failed to unblock entity: ${response.status} - $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getBlockedUsers(): Result<List<BlockedUserResponse>> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/blocked/users"
+        return try {
+            val response = client.get(url) { getHeaders(this) }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return getBlockedUsers()
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                Result.failure(Exception("Failed to get blocked users: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getBlockedMembers(): Result<List<BlockedMemberResponse>> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/blocked/members"
+        return try {
+            val response = client.get(url) { getHeaders(this) }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return getBlockedMembers()
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                Result.failure(Exception("Failed to get blocked members: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getBlockedSystems(): Result<List<BlockedSystemResponse>> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/safety/blocked/systems"
+        return try {
+            val response = client.get(url) { getHeaders(this) }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return getBlockedSystems()
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                Result.failure(Exception("Failed to get blocked systems: ${response.status}"))
             }
         } catch (e: Exception) {
             Result.failure(e)

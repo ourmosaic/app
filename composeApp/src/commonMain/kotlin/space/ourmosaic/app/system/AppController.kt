@@ -91,6 +91,14 @@ class AppController(
             SseTopics.IMPORT -> {
                 handleImportEvent(event, i18nState)
             }
+            SseTopics.BLOCKS -> {
+                systemService.getBlockedUsers()
+                systemService.getBlockedMembers()
+                systemService.getBlockedSystems()
+            }
+            SseTopics.REPORTS -> {
+                // Reports are usually handled by moderators, but we might want to refresh something if needed
+            }
         }
     }
 

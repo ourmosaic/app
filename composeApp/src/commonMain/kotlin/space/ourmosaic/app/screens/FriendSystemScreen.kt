@@ -11,6 +11,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Report
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -47,6 +49,9 @@ fun FriendSystemScreen(
     val pagerState = rememberPagerState(pageCount = { 2 })
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
+    
+    var showReportDialog by remember { mutableStateOf(false) }
+    var showBlockDialog by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -129,6 +134,12 @@ fun FriendSystemScreen(
                         }
                         IconButton(onClick = { showPermissionsDialog = true }) {
                             Icon(Icons.Default.Settings, contentDescription = "Permissions")
+                        }
+                        IconButton(onClick = { showReportDialog = true }) {
+                            Icon(Icons.Default.Report, contentDescription = i18n.text(MessageKey.CommonReport))
+                        }
+                        IconButton(onClick = { showBlockDialog = true }) {
+                            Icon(Icons.Default.Block, contentDescription = i18n.text(MessageKey.CommonBlock))
                         }
                     }
                 )
@@ -249,6 +260,7 @@ fun FriendSystemScreen(
             onDismiss = { showPermissionsDialog = false },
             onUpdate = { dto ->
                 scope.launch {
+                    showPermissionsDialog = false
                     systemService.updateFriendshipPermissions(friendId, dto).onSuccess {
                         snackbarHostState.showSnackbar("Permissions updated")
                         loadData()
@@ -257,7 +269,52 @@ fun FriendSystemScreen(
                         it.printStackTrace()
                         snackbarHostState.showSnackbar("Failed to update friend settings: ${it.message}")
                     }
-                    showPermissionsDialog = false
+                }
+            }
+        )
+    }
+
+    if (showReportDialog) {
+        SafetyActionDialog(
+            title = i18n.text(MessageKey.CommonReport),
+            confirmLabel = i18n.text(MessageKey.CommonReport),
+            reasonHint = i18n.text(MessageKey.ReportReasonHint),
+            i18n = i18n,
+            minReasonLength = 10,
+            onDismiss = { showReportDialog = false },
+            onConfirm = { reason ->
+                scope.launch {
+                    showReportDialog = false
+                    systemService.reportEntity(ReportRequest(ReportType.SYSTEM, friendSystem!!.id, reason))
+                        .onSuccess {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.ReportSuccess)) }
+                        }
+                        .onFailure {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.ReportError, it.message ?: "Unknown error")) }
+                        }
+                }
+            }
+        )
+    }
+
+    if (showBlockDialog) {
+        SafetyActionDialog(
+            title = i18n.text(MessageKey.CommonBlock),
+            confirmLabel = i18n.text(MessageKey.CommonBlock),
+            reasonHint = i18n.text(MessageKey.BlockReasonHint),
+            i18n = i18n,
+            onDismiss = { showBlockDialog = false },
+            onConfirm = { reason ->
+                scope.launch {
+                    systemService.blockEntity(BlockRequest(BlockType.SYSTEM, friendSystem!!.id, reason))
+                        .onSuccess {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.BlockSuccess)) }
+                            showBlockDialog = false
+                            onBack()
+                        }
+                        .onFailure {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.BlockError, it.message ?: "Unknown error")) }
+                        }
                 }
             }
         )

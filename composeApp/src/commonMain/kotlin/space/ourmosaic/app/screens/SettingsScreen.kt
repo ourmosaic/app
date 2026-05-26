@@ -6,6 +6,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -30,7 +31,10 @@ fun SettingsScreen(
     onLogout: () -> Unit,
     offlineManager: space.ourmosaic.app.offline.OfflineManager,
     systemService: space.ourmosaic.app.system.SystemService,
-    authService: AuthService
+    authService: AuthService,
+    onNavigate: (space.ourmosaic.app.navigation.Route) -> Unit,
+    theme: space.ourmosaic.app.AppTheme,
+    onThemeChange: (space.ourmosaic.app.AppTheme) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -64,6 +68,17 @@ fun SettingsScreen(
                 )
                 
                 LanguageRadioGroup(i18n = i18n)
+            }
+
+            // Section Theme
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = i18n.text(MessageKey.ThemeLabel),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                ThemeRadioGroup(i18n = i18n, currentTheme = theme, onThemeChange = onThemeChange)
             }
 
             // Section Notifications
@@ -127,6 +142,28 @@ fun SettingsScreen(
                 }
             }
 
+            // Section Safety
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = i18n.text(MessageKey.SafetyTitle),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Button(
+                    onClick = { onNavigate(space.ourmosaic.app.navigation.Route.BlockedEntities) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(i18n.text(MessageKey.SafetyBlockedEntities))
+                }
+            }
+
             Spacer(Modifier.weight(1f))
 
             // Section Logout
@@ -146,6 +183,42 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(i18n.text(MessageKey.LogoutButton))
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemeRadioGroup(i18n: I18nState, currentTheme: space.ourmosaic.app.AppTheme, onThemeChange: (space.ourmosaic.app.AppTheme) -> Unit) {
+    val options = listOf(
+        space.ourmosaic.app.AppTheme.System to i18n.text(MessageKey.ThemeSystem),
+        space.ourmosaic.app.AppTheme.Light to i18n.text(MessageKey.ThemeLight),
+        space.ourmosaic.app.AppTheme.Dark to i18n.text(MessageKey.ThemeDark)
+    )
+
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (theme, label) ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .selectable(
+                        selected = (currentTheme == theme),
+                        onClick = { onThemeChange(theme) },
+                        role = Role.RadioButton
+                    )
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = (currentTheme == theme),
+                    onClick = null
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 16.dp)
+                )
             }
         }
     }

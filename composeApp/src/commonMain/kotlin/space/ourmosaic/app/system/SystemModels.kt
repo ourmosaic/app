@@ -149,6 +149,7 @@ data class CreateMemberDto(
     val description: String? = null,
     val pronouns: String? = null,
     val role: String? = null,
+    val inDormancy: Boolean = false,
     val privacy: PrivacyLevel = PrivacyLevel.PRIVATE,
     val color: String? = null
 )
@@ -164,8 +165,86 @@ data class UpdateMemberDto(
     val description: String? = null,
     val pronouns: String? = null,
     val role: String? = null,
+    val inDormancy: Boolean? = null,
     val privacy: PrivacyLevel? = null,
     val color: String? = null
+)
+
+@Serializable
+enum class ReportType {
+    SYSTEM, USER, MEMBER
+}
+
+@Serializable
+enum class BlockType {
+    SYSTEM, USER, MEMBER
+}
+
+@Serializable
+data class ReportRequest(
+    val type: ReportType,
+    val targetId: String,
+    val reason: String? = null
+)
+
+@Serializable
+data class ReportResponse(
+    val id: String,
+    val reportId: String? = null,
+    val type: ReportType? = null,
+    val targetId: String ? = null,
+    val reason: String? = null,
+    val createdAt: String,
+    val reporter: ReporterInfo? = null
+)
+
+@Serializable
+data class ReporterInfo(
+    val id: String,
+    val username: String? = null
+)
+
+@Serializable
+data class BlockRequest(
+    val type: BlockType,
+    val targetId: String,
+    val reason: String? = null
+)
+
+@Serializable
+data class UnblockRequest(
+    val type: BlockType,
+    val targetId: String
+)
+
+@Serializable
+data class BlockedUserResponse(
+    val id: String,
+    val blockerId: String,
+    val blockedId: String,
+    val reason: String? = null,
+    val createdAt: String,
+    val blocked: SystemResponse
+)
+
+@Serializable
+data class BlockedMemberResponse(
+    val id: String,
+    val blockerId: String,
+    val blockedId: String,
+    val reason: String? = null,
+    val createdAt: String,
+    val blocked: MemberResponse
+)
+
+@Serializable
+data class BlockedSystemResponse(
+    val id: String,
+    val blockerId: String,
+    val blockedId: String,
+    val reason: String? = null,
+    val createdAt: String,
+    val blocked: SystemResponse
 )
 
 object SseTopics {
@@ -178,6 +257,8 @@ object SseTopics {
     const val PING = "ping"
     const val KEEPALIVE = "keepalive"
     const val READY = "ready"
+    const val BLOCKS = "blocks"
+    const val REPORTS = "reports"
 }
 
 @Serializable

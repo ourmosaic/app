@@ -225,13 +225,19 @@ class AuthService {
     fun getAccessToken(): String? = secureSettings.getStringOrNull("access_token")
     fun getRefreshToken(): String? = secureSettings.getStringOrNull("refresh_token")
 
-    suspend fun createSystem(): Result<Unit> {
+    suspend fun createSystem(allowRetry: Boolean = true): Result<Unit> {
         val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
         val token = getAccessToken() ?: return Result.failure(Exception("No access token stored"))
 
         return try {
             val response = client.post("https://$federation/v1/system/@me") {
                 header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
+                val refreshResult = refreshToken()
+                if (refreshResult.isSuccess) {
+                    return createSystem(allowRetry = false)
+                }
             }
             if (response.status.isSuccess()) {
                 getUserMe() // Refresh cache and flow
@@ -244,7 +250,7 @@ class AuthService {
         }
     }
 
-    suspend fun importFromSimplyPlural(apiKey: String): Result<String> {
+    suspend fun importFromSimplyPlural(apiKey: String, allowRetry: Boolean = true): Result<String> {
         val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
         val token = getAccessToken() ?: return Result.failure(Exception("No access token stored"))
 
@@ -253,6 +259,12 @@ class AuthService {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("apiKey" to apiKey))
+            }
+            if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
+                val refreshResult = refreshToken()
+                if (refreshResult.isSuccess) {
+                    return importFromSimplyPlural(apiKey, allowRetry = false)
+                }
             }
             if (response.status.isSuccess()) {
                 val body = response.body<Map<String, String>>()

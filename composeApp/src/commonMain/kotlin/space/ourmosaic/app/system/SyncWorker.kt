@@ -101,6 +101,10 @@ class SyncWorker(
                                 val dto = json.decodeFromString(UpdateMemberDto.serializer(), resolvedPayload)
                                 systemService.updateMember(memberId, dto, fromSync = true)
                             }
+                            PendingActionType.DELETE_MEMBER -> {
+                                val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
+                                systemService.deleteMember(memberId, fromSync = true)
+                            }
                             PendingActionType.UPDATE_MEMBER_FIELD -> {
                                 val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
                                 val fieldId = resolveServerId(action.fieldId) ?: throw Exception("Missing fieldId")

@@ -73,7 +73,10 @@ fun MembersManageScreen(
     val cachedGroups by offlineManager.cachedGroups.collectAsState(initial = emptyList())
 
     val activeSessions = cachedSessions?.filter { it.endTime == null } ?: emptyList()
-    val displayGroups = (cachedGroups ?: emptyList()).filter { it.parentId == currentGroupId }
+    val displayGroups = (cachedGroups ?: emptyList())
+        .filter { it.parentId == currentGroupId }
+        .sortedBy { it.name?.lowercase() }
+    
     val displayMembers = (cachedMembers ?: emptyList()).map { member ->
         member.copy(currentFrontSessions = activeSessions.filter { it.memberId == member.id })
     }.let { membersList ->
@@ -84,7 +87,7 @@ fun MembersManageScreen(
         } else {
             membersList.filter { m -> m.groups.any { it.groupId == currentGroupId } }
         }
-        filtered
+        filtered.sortedBy { it.name.lowercase() }
     }
 
     val currentGroup = cachedGroups?.find { it.id == currentGroupId }

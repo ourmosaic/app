@@ -18,8 +18,11 @@ import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.components.MosaicAvatar
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
-import space.ourmosaic.app.system.MemberResponse
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Report
+import space.ourmosaic.app.system.*
 import space.ourmosaic.app.utils.ColorUtils
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,12 +31,20 @@ fun FriendMemberDetailScreen(
     i18n: I18nState,
     onBack: () -> Unit,
     onEdit: (String) -> Unit,
-    authService: AuthService
+    authService: AuthService,
+    systemService: SystemService
 ) {
     val userMe by authService.userMe.collectAsState()
     val isOwnMember = userMe?.system?.id == member.systemId
+    
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    
+    var showReportDialog by remember { mutableStateOf(false) }
+    var showBlockDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(member.name) },
@@ -46,6 +57,13 @@ fun FriendMemberDetailScreen(
                     if (isOwnMember) {
                         IconButton(onClick = { onEdit(member.id) }) {
                             Icon(Icons.Default.Edit, contentDescription = i18n.text(MessageKey.CommonEdit))
+                        }
+                    } else {
+                        IconButton(onClick = { showReportDialog = true }) {
+                            Icon(Icons.Default.Report, contentDescription = i18n.text(MessageKey.CommonReport))
+                        }
+                        IconButton(onClick = { showBlockDialog = true }) {
+                            Icon(Icons.Default.Block, contentDescription = i18n.text(MessageKey.CommonBlock))
                         }
                     }
                 }
@@ -169,4 +187,91 @@ fun FriendMemberDetailScreen(
             }
         }
     }
+
+    if (showReportDialog) {
+        SafetyActionDialog(
+            title = i18n.text(MessageKey.CommonReport),
+            confirmLabel = i18n.text(MessageKey.CommonReport),
+            reasonHint = i18n.text(MessageKey.ReportReasonHint),
+            i18n = i18n,
+            minReasonLength = 10,
+            onDismiss = { showReportDialog = false },
+            onConfirm = { reason ->
+                scope.launch {
+                    showReportDialog = false
+                    systemService.reportEntity(ReportRequest(ReportType.MEMBER, member.id, reason))
+                        .onSuccess {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.ReportSuccess)) }
+                        }
+                        .onFailure {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.ReportError, it.message ?: "Unknown error")) }
+                        }
+                }
+            }
+        )
+    }
+
+    if (showBlockDialog) {
+        SafetyActionDialog(
+            title = i18n.text(MessageKey.CommonBlock),
+            confirmLabel = i18n.text(MessageKey.CommonBlock),
+            reasonHint = i18n.text(MessageKey.BlockReasonHint),
+            i18n = i18n,
+            onDismiss = { showBlockDialog = false },
+            onConfirm = { reason ->
+                scope.launch {
+                    systemService.blockEntity(BlockRequest(BlockType.MEMBER, member.id, reason))
+                        .onSuccess {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.BlockSuccess)) }
+                            showBlockDialog = false
+                            onBack()
+                        }
+                        .onFailure {
+                            launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.BlockError, it.message ?: "Unknown error")) }
+                        }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun SafetyActionDialog(
+    title: String,
+    confirmLabel: String,
+    reasonHint: String,
+    i18n: I18nState,
+    minReasonLength: Int = 0,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var reason by remember { mutableStateOf("") }
+    val isConfirmEnabled = reason.length >= minReasonLength
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = reason,
+                onValueChange = { reason = it },
+                label = { Text(reasonHint) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(reason) },
+                enabled = isConfirmEnabled
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(i18n.text(MessageKey.ProfileCancel))
+            }
+        }
+    )
 }

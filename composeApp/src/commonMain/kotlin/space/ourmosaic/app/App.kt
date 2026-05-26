@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.russhwolf.settings.set
 import io.kamel.core.config.KamelConfig
 import io.kamel.core.config.httpUrlFetcher
 import io.kamel.core.config.takeFrom
@@ -28,6 +29,10 @@ import space.ourmosaic.app.utils.Logger
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonObject
 
+enum class AppTheme {
+    System, Light, Dark
+}
+
 @Composable
 fun App(initialTargetRoute: String? = null) {
     val authService = remember { AuthService() }
@@ -48,7 +53,23 @@ fun App(initialTargetRoute: String? = null) {
         }
     }
 
-    MaterialTheme {
+    val settings = remember { com.russhwolf.settings.Settings() }
+    var theme by remember { 
+        mutableStateOf(
+            try { AppTheme.valueOf(settings.getString("app_theme", AppTheme.System.name)) }
+            catch (e: Exception) { AppTheme.System }
+        )
+    }
+
+    val darkTheme = when (theme) {
+        AppTheme.System -> androidx.compose.foundation.isSystemInDarkTheme()
+        AppTheme.Light -> false
+        AppTheme.Dark -> true
+    }
+
+    MaterialTheme(
+        colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme()
+    ) {
         CompositionLocalProvider(LocalKamelConfig provides kamelConfig) {
             val i18nState = rememberI18nState()
             val navState = rememberNavState(startRoute)
@@ -116,7 +137,12 @@ fun App(initialTargetRoute: String? = null) {
                         sseService = sseService,
                         offlineManager = offlineManager,
                         authService = authService,
-                        syncWorker = syncWorker
+                        syncWorker = syncWorker,
+                        theme = theme,
+                        onThemeChange = { 
+                            theme = it
+                            settings.set("app_theme", it.name)
+                        }
                     )
                 }
             }

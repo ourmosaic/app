@@ -18,6 +18,7 @@ import space.ourmosaic.app.system.UpdateCustomFieldDefinitionDto
 enum class PendingActionType(val idPrefix: String) {
     CREATE_MEMBER("crt_mem"),
     UPDATE_MEMBER("upd_mem"),
+    DELETE_MEMBER("del_mem"),
     UPDATE_MEMBER_FIELD("fld"),
     UPDATE_SYSTEM("upd_sys"),
     START_FRONT("front_start"),
@@ -66,6 +67,9 @@ class OfflineManager(private val settings: Settings = Settings()) {
     private val FRIENDS_CACHE_KEY = "cached_friends"
     private val SENT_REQUESTS_CACHE_KEY = "cached_sent_requests"
     private val RECEIVED_REQUESTS_CACHE_KEY = "cached_received_requests"
+    private val BLOCKED_USERS_CACHE_KEY = "cached_blocked_users"
+    private val BLOCKED_MEMBERS_CACHE_KEY = "cached_blocked_members"
+    private val BLOCKED_SYSTEMS_CACHE_KEY = "cached_blocked_systems"
 
     private val _pendingActions = MutableStateFlow(getPendingActions())
     private val _pendingActionsCount = MutableStateFlow(_pendingActions.value.size)
@@ -76,6 +80,21 @@ class OfflineManager(private val settings: Settings = Settings()) {
 
     private val _syncTrigger = MutableStateFlow(0L)
     val syncTrigger: StateFlow<Long> = _syncTrigger.asStateFlow()
+
+    private val _blockedUsers = MutableStateFlow<List<space.ourmosaic.app.system.BlockedUserResponse>?>(null)
+    val cachedBlockedUsers: Flow<List<space.ourmosaic.app.system.BlockedUserResponse>> = _blockedUsers
+        .map { it ?: getCachedBlockedUsers() ?: emptyList() }
+        .distinctUntilChanged()
+
+    private val _blockedMembers = MutableStateFlow<List<space.ourmosaic.app.system.BlockedMemberResponse>?>(null)
+    val cachedBlockedMembers: Flow<List<space.ourmosaic.app.system.BlockedMemberResponse>> = _blockedMembers
+        .map { it ?: getCachedBlockedMembers() ?: emptyList() }
+        .distinctUntilChanged()
+
+    private val _blockedSystems = MutableStateFlow<List<space.ourmosaic.app.system.BlockedSystemResponse>?>(null)
+    val cachedBlockedSystems: Flow<List<space.ourmosaic.app.system.BlockedSystemResponse>> = _blockedSystems
+        .map { it ?: getCachedBlockedSystems() ?: emptyList() }
+        .distinctUntilChanged()
 
     private val _serverFriends = MutableStateFlow<List<space.ourmosaic.app.system.SystemResponse>?>(null)
     val cachedFriends: Flow<List<space.ourmosaic.app.system.SystemResponse>> = _serverFriends
@@ -198,7 +217,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
                         id = action.id,
                         name = dto.name,
                         pronouns = dto.pronouns,
-                        inDormancy = false,
+                        inDormancy = dto.inDormancy,
                         privacy = dto.privacy ?: space.ourmosaic.app.system.PrivacyLevel.PRIVATE,
                         description = dto.description,
                         role = dto.role,
@@ -224,11 +243,18 @@ class OfflineManager(private val settings: Settings = Settings()) {
                         pronouns = dto.pronouns ?: current.pronouns,
                         description = dto.description ?: current.description,
                         role = dto.role ?: current.role,
+                        inDormancy = dto.inDormancy ?: current.inDormancy,
                         privacy = dto.privacy ?: current.privacy,
                         color = dto.color ?: current.color
                     )
                 }
             } catch (e: Exception) {}
+        }
+
+        // Optimistic deletion
+        actions.filter { it.type == PendingActionType.DELETE_MEMBER }.forEach { action ->
+            val memberId = resolveId(action.memberId, mappings)
+            result.removeAll { it.id == memberId }
         }
 
         // Optimistic member field update
@@ -634,6 +660,48 @@ class OfflineManager(private val settings: Settings = Settings()) {
         val raw = settings.getStringOrNull(RECEIVED_REQUESTS_CACHE_KEY) ?: return null
         return try {
             json.decodeFromString(ListSerializer(space.ourmosaic.app.system.FriendRequestResponse.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun cacheBlockedUsers(users: List<space.ourmosaic.app.system.BlockedUserResponse>) {
+        settings[BLOCKED_USERS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.BlockedUserResponse.serializer()), users)
+        _blockedUsers.value = users
+    }
+
+    fun getCachedBlockedUsers(): List<space.ourmosaic.app.system.BlockedUserResponse>? {
+        val raw = settings.getStringOrNull(BLOCKED_USERS_CACHE_KEY) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.BlockedUserResponse.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun cacheBlockedMembers(members: List<space.ourmosaic.app.system.BlockedMemberResponse>) {
+        settings[BLOCKED_MEMBERS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.BlockedMemberResponse.serializer()), members)
+        _blockedMembers.value = members
+    }
+
+    fun getCachedBlockedMembers(): List<space.ourmosaic.app.system.BlockedMemberResponse>? {
+        val raw = settings.getStringOrNull(BLOCKED_MEMBERS_CACHE_KEY) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.BlockedMemberResponse.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun cacheBlockedSystems(systems: List<space.ourmosaic.app.system.BlockedSystemResponse>) {
+        settings[BLOCKED_SYSTEMS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.BlockedSystemResponse.serializer()), systems)
+        _blockedSystems.value = systems
+    }
+
+    fun getCachedBlockedSystems(): List<space.ourmosaic.app.system.BlockedSystemResponse>? {
+        val raw = settings.getStringOrNull(BLOCKED_SYSTEMS_CACHE_KEY) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.BlockedSystemResponse.serializer()), raw)
         } catch (e: Exception) {
             null
         }
