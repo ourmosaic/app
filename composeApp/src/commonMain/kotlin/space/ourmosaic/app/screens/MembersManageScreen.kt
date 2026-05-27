@@ -4,7 +4,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -37,7 +41,7 @@ enum class FrontMode {
     NONE, ADD, SET
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MembersManageScreen(
     i18n: I18nState,
@@ -49,6 +53,7 @@ fun MembersManageScreen(
     authService: AuthService
 ) {
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     
     var currentGroupId by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -59,6 +64,10 @@ fun MembersManageScreen(
     var frontMode by remember { mutableStateOf<FrontMode>(FrontMode.NONE) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
+    var selectedMemberIds by remember { mutableStateOf(setOf<String>()) }
+    var showBulkDeleteConfirm by remember { mutableStateOf(false) }
+    
+    val isSelectionMode = selectedMemberIds.isNotEmpty()
     
     val pendingCount by offlineManager.pendingActionsCount.collectAsState()
 
@@ -167,6 +176,60 @@ fun MembersManageScreen(
                         }
                     }
                 )
+            } else if (isSelectionMode) {
+                TopAppBar(
+                    title = { Text(i18n.text(MessageKey.MembersSelected, selectedMemberIds.size)) },
+                    navigationIcon = {
+                        IconButton(onClick = { selectedMemberIds = emptySet() }) {
+                            Icon(Icons.Default.Close, contentDescription = i18n.text(MessageKey.CommonCancel))
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            scope.launch {
+                                val members = (cachedMembers ?: emptyList()).filter { selectedMemberIds.contains(it.id) }
+                                val allDormant = members.all { it.inDormancy }
+                                members.forEach { m ->
+                                    systemService.updateMember(m.id, UpdateMemberDto(inDormancy = !allDormant))
+                                }
+                                selectedMemberIds = emptySet()
+                            }
+                        }) {
+                            val members = (cachedMembers ?: emptyList()).filter { selectedMemberIds.contains(it.id) }
+                            val allDormant = members.all { it.inDormancy }
+                            Icon(
+                                if (allDormant) Icons.Default.BedtimeOff else Icons.Default.Bedtime, 
+                                contentDescription = i18n.text(MessageKey.BulkActionDormancy)
+                            )
+                        }
+                        IconButton(onClick = {
+                            scope.launch {
+                                val members = (cachedMembers ?: emptyList()).filter { selectedMemberIds.contains(it.id) }
+                                val someFronting = members.any { m -> activeSessions.any { it.memberId == m.id } }
+                                
+                                members.forEach { m ->
+                                    val sessions = activeSessions.filter { it.memberId == m.id }
+                                    if (someFronting) {
+                                        sessions.forEach { s -> systemService.endFrontSession(m.id, s.id) }
+                                    } else {
+                                        systemService.startFrontSession(m.id)
+                                    }
+                                }
+                                selectedMemberIds = emptySet()
+                            }
+                        }) {
+                            val members = (cachedMembers ?: emptyList()).filter { selectedMemberIds.contains(it.id) }
+                            val someFronting = members.any { m -> activeSessions.any { it.memberId == m.id } }
+                            Icon(
+                                if (someFronting) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, 
+                                contentDescription = i18n.text(MessageKey.BulkActionFront)
+                            )
+                        }
+                        IconButton(onClick = { showBulkDeleteConfirm = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = i18n.text(MessageKey.BulkActionDelete))
+                        }
+                    }
+                )
             } else {
                 TopAppBar(
                     title = { 
@@ -233,7 +296,7 @@ fun MembersManageScreen(
             }
         },
         bottomBar = {
-            if (frontMode == FrontMode.NONE) {
+            if (frontMode == FrontMode.NONE && !isSelectionMode) {
                 BottomAppBar(
                     actions = {
                         IconButton(onClick = { showAddGroupDialog = true }) {
@@ -328,46 +391,75 @@ fun MembersManageScreen(
                         // Then Members
                         items(displayMembers) { member ->
                             val isFront = member.currentFrontSessions.any { it.endTime == null }
+                            val isSelected = selectedMemberIds.contains(member.id)
                             
                             Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = { 
-                                    if (frontMode == FrontMode.NONE) {
-                                        onEditMember(member.id)
-                                    } else {
-                                        scope.launch {
-                                            if (frontMode == FrontMode.SET) {
-                                                // Terminer les autres sessions d'abord
-                                                displayMembers.forEach { m ->
-                                                    m.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
-                                                        systemService.endFrontSession(m.id, s.id)
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(IntrinsicSize.Min)
+                                        .combinedClickable(
+                                            onClick = { 
+                                                if (isSelectionMode) {
+                                                    selectedMemberIds = if (isSelected) selectedMemberIds - member.id else selectedMemberIds + member.id
+                                                } else if (frontMode == FrontMode.NONE) {
+                                                    onEditMember(member.id)
+                                                } else {
+                                                    scope.launch {
+                                                        if (frontMode == FrontMode.SET) {
+                                                            // Terminer les autres sessions d'abord
+                                                            displayMembers.forEach { m ->
+                                                                m.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
+                                                                    systemService.endFrontSession(m.id, s.id)
+                                                                }
+                                                            }
+                                                            systemService.startFrontSession(member.id)
+                                                        } else {
+                                                            if (isFront) {
+                                                                member.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
+                                                                    systemService.endFrontSession(member.id, s.id)
+                                                                }
+                                                            } else {
+                                                                systemService.startFrontSession(member.id)
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                                systemService.startFrontSession(member.id)
-                                            } else {
-                                                if (isFront) {
-                                                    member.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
-                                                        systemService.endFrontSession(member.id, s.id)
-                                                    }
-                                                } else {
-                                                    systemService.startFrontSession(member.id)
+                                            },
+                                            onLongClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                if (!isSelectionMode) {
+                                                    selectedMemberIds = setOf(member.id)
                                                 }
                                             }
-                                        }
+                                        )
+                                ) {
+                                    if (isSelectionMode) {
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { 
+                                                selectedMemberIds = if (isSelected) selectedMemberIds - member.id else selectedMemberIds + member.id
+                                            },
+                                            modifier = Modifier.padding(start = 8.dp).align(Alignment.CenterStart)
+                                        )
                                     }
-                                }
-                            ) {
-                                Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                    
+                                    val colorBarWidth = 6.dp
+                                    val startPadding = if (isSelectionMode) 48.dp else 0.dp
+
                                     if (!member.color.isNullOrBlank()) {
                                         Box(
                                             Modifier
                                                 .fillMaxHeight()
-                                                .width(6.dp)
+                                                .width(colorBarWidth)
+                                                .padding(start = startPadding)
                                                 .background(ColorUtils.parseHexColor(member.color))
                                         )
                                     }
                                     Row(
-                                        modifier = Modifier.padding(16.dp).padding(start = if (!member.color.isNullOrBlank()) 8.dp else 0.dp),
+                                        modifier = Modifier.padding(16.dp).padding(start = startPadding + (if (!member.color.isNullOrBlank()) 8.dp else 0.dp)),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         MosaicAvatar(
@@ -617,6 +709,51 @@ fun MembersManageScreen(
                 )
             }
         }
+    }
+
+    if (showBulkDeleteConfirm) {
+        var deleteTapCount by remember { mutableIntStateOf(0) }
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteConfirm = false },
+            title = { Text(i18n.text(MessageKey.DeleteMemberConfirmTitle)) },
+            text = {
+                Column {
+                    Text(i18n.text(MessageKey.DeleteMemberConfirmText))
+                    if (deleteTapCount > 0) {
+                        LinearProgressIndicator(
+                            progress = { deleteTapCount / 5f },
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deleteTapCount++
+                        if (deleteTapCount >= 5) {
+                            scope.launch {
+                                selectedMemberIds.forEach { id ->
+                                    systemService.deleteMember(id)
+                                }
+                                selectedMemberIds = emptySet()
+                                showBulkDeleteConfirm = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (deleteTapCount >= 4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(if (deleteTapCount >= 4) i18n.text(MessageKey.DeleteMemberConfirmAction) else "${5 - deleteTapCount}...")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDeleteConfirm = false }) {
+                    Text(i18n.text(MessageKey.CommonCancel))
+                }
+            }
+        )
     }
 
     if (showAddDialog) {

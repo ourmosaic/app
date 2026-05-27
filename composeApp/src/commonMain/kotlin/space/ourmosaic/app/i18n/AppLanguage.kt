@@ -171,5 +171,9 @@ enum class MessageKey {
     ThemeDark,
     SettingsHideDormantMembers,
     SettingsHideMembersInFoldersAtRoot,
+    MembersSelected,
+    BulkActionDormancy,
+    BulkActionFront,
+    BulkActionDelete,
 }
 

@@ -231,6 +231,10 @@ private val englishMessages = mapOf(
     MessageKey.ThemeDark to "Dark",
     MessageKey.SettingsHideDormantMembers to "Hide dormant members",
     MessageKey.SettingsHideMembersInFoldersAtRoot to "Hide members that are in folders at root",
+    MessageKey.MembersSelected to "%s selected",
+    MessageKey.BulkActionDormancy to "Toggle Dormancy",
+    MessageKey.BulkActionFront to "Toggle Front",
+    MessageKey.BulkActionDelete to "Delete Members",
 )
 
 private val frenchMessages = mapOf(
@@ -395,4 +399,8 @@ private val frenchMessages = mapOf(
     MessageKey.ThemeDark to "Sombre",
     MessageKey.SettingsHideDormantMembers to "Masquer les membres en dormance",
     MessageKey.SettingsHideMembersInFoldersAtRoot to "Masquer les membres classés à la racine",
+    MessageKey.MembersSelected to "%s sélectionné(s)",
+    MessageKey.BulkActionDormancy to "Basculer la dormance",
+    MessageKey.BulkActionFront to "Basculer le front",
+    MessageKey.BulkActionDelete to "Supprimer les membres",
 )
