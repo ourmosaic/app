@@ -89,7 +89,7 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 6
-        versionName = "0.0.12"
+        versionName = "0.0.12-canary"
     }
     packaging {
         resources {

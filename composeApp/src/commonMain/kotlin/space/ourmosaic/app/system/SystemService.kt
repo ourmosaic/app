@@ -117,7 +117,8 @@ class SystemService(
                     type = PendingActionType.UPDATE_SYSTEM,
                     jsonPayload = json.encodeToString(UpdateSystemDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -137,10 +138,12 @@ class SystemService(
                 Result.success(system)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update system: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val currentSystem = authService.userMe.value?.system
                 val dummy = SystemResponse(
                     id = currentSystem?.id ?: settings.getStringOrNull("system_id") ?: "",
@@ -167,7 +170,8 @@ class SystemService(
                     type = PendingActionType.CREATE_MEMBER,
                     jsonPayload = json.encodeToString(CreateMemberDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -192,10 +196,12 @@ class SystemService(
                 Result.success(member)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to create member: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 // Return a dummy member with the actionId as temporary ID
                 Result.success(MemberResponse(
                     id = actionId,
@@ -225,7 +231,8 @@ class SystemService(
                     memberId = memberId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -241,10 +248,12 @@ class SystemService(
                 removeMemberFromCache(memberId)
                 Result.success(Unit)
             } else {
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to delete member: ${response.status}"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 removeMemberFromCache(memberId)
                 Result.success(Unit)
             } else Result.failure(e)
@@ -280,7 +289,8 @@ class SystemService(
                     memberId = memberId,
                     jsonPayload = json.encodeToString(UpdateMemberDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -300,10 +310,12 @@ class SystemService(
                 Result.success(member)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update member: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 // Return dummy response
                 val current = offlineManager.getCachedMembers()?.find { it.id == memberId }
                 val dummy = current?.copy(
@@ -342,7 +354,8 @@ class SystemService(
                     fieldId = fieldId,
                     jsonPayload = value,
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -362,10 +375,12 @@ class SystemService(
                 Result.success(member)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update member field: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val current = offlineManager.getCachedMembers()?.find { it.id == memberId }
                 if (current != null) {
                     val updatedFields = current.customFieldValues.toMutableList()
@@ -400,18 +415,20 @@ class SystemService(
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
         val url = "https://$federation/v1/system/@me/members/$memberId/avatar"
         
-        if (!fromSync) {
+        val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
+        if (actionId != null) {
             val fileName = "avatar_${memberId}_${Clock.System.now().toEpochMilliseconds()}.jpg"
             space.ourmosaic.app.utils.writeToCache(fileName, avatarBytes)
             
             offlineManager.queueAction(
                 PendingAction(
-                    id = generateId(PendingActionType.UPLOAD_AVATAR),
+                    id = actionId,
                     type = PendingActionType.UPLOAD_AVATAR,
                     memberId = memberId,
                     jsonPayload = fileName,
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -432,12 +449,15 @@ class SystemService(
             }
             if (response.status.isSuccess()) {
                 val member = response.body<MemberResponse>()
+                if (actionId != null) offlineManager.removeAction(actionId)
                 updateMemberCacheOptimistically(member)
                 Result.success(member)
             } else {
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to upload member avatar: ${response.status}"))
             }
         } catch (e: Exception) {
+            if (actionId != null) triggerSync()
             Result.failure(e)
         }
     }
@@ -455,7 +475,8 @@ class SystemService(
                     memberId = groupId,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -475,10 +496,12 @@ class SystemService(
                 Result.success(group)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update group: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val current = offlineManager.getCachedGroups()?.find { it.id == groupId }
                 val updated = current?.copy(
                     name = dto.name,
@@ -491,7 +514,7 @@ class SystemService(
                     color = dto.color,
                     icon = dto.icon,
                     parentId = dto.parentId,
-                    systemId = ""
+                    systemId = settings.getStringOrNull("system_id") ?: ""
                 )
                 updateGroupCacheOptimistically(updated)
                 Result.success(updated)
@@ -503,18 +526,20 @@ class SystemService(
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
         val url = "https://$federation/v1/system/@me/avatar"
         
-        if (!fromSync) {
+        val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
+        if (actionId != null) {
             val fileName = "avatar_me_${Clock.System.now().toEpochMilliseconds()}.jpg"
             space.ourmosaic.app.utils.writeToCache(fileName, avatarBytes)
             
             offlineManager.queueAction(
                 PendingAction(
-                    id = generateId(PendingActionType.UPLOAD_AVATAR),
+                    id = actionId,
                     type = PendingActionType.UPLOAD_AVATAR,
                     memberId = "@me",
                     jsonPayload = fileName,
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -535,12 +560,15 @@ class SystemService(
             }
             if (response.status.isSuccess()) {
                 val system = response.body<SystemResponse>()
+                if (actionId != null) offlineManager.removeAction(actionId)
                 updateCachedSystem(system)
                 Result.success(system)
             } else {
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to upload system avatar: ${response.status}"))
             }
         } catch (e: Exception) {
+            if (actionId != null) triggerSync()
             Result.failure(e)
         }
     }
@@ -584,7 +612,8 @@ class SystemService(
                     type = PendingActionType.CREATE_CUSTOM_FIELD,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -606,10 +635,12 @@ class SystemService(
                 Result.success(field)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to create custom field: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 Result.success(CustomField(
                     id = actionId,
                     name = "New Field",
@@ -635,7 +666,8 @@ class SystemService(
                     fieldId = fieldId,
                     jsonPayload = json.encodeToString(UpdateCustomFieldDefinitionDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -656,17 +688,31 @@ class SystemService(
                 Result.success(field)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update custom field: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val current = offlineManager.getCachedCustomFields()?.find { it.id == fieldId }
-                Result.success(current?.copy(
+                val dummy = current?.copy(
                     name = dto.name ?: current.name,
                     type = dto.type ?: current.type,
                     order = dto.order ?: current.order,
                     privacy = dto.privacy ?: current.privacy
-                ) ?: CustomField(id = fieldId, name = dto.name ?: "", type = dto.type ?: FieldType.STRING, order = 0, privacy = PrivacyLevel.PRIVATE, systemId = ""))
+                ) ?: CustomField(
+                    id = fieldId, 
+                    name = dto.name ?: "", 
+                    type = dto.type ?: FieldType.STRING, 
+                    order = 0, 
+                    privacy = PrivacyLevel.PRIVATE, 
+                    systemId = settings.getStringOrNull("system_id") ?: ""
+                )
+                
+                val currentFields = offlineManager.getCachedCustomFields() ?: emptyList()
+                offlineManager.cacheCustomFields(currentFields.map { if (it.id == fieldId) dummy else it })
+                
+                Result.success(dummy)
             } else Result.failure(e)
         }
     }
@@ -684,7 +730,8 @@ class SystemService(
                     fieldId = fieldId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -702,11 +749,14 @@ class SystemService(
                 Result.success(Unit)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to delete custom field: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
-            if (actionId != null) Result.success(Unit)
-            else Result.failure(e)
+            if (actionId != null) {
+                triggerSync()
+                Result.success(Unit)
+            } else Result.failure(e)
         }
     }
 
@@ -1060,7 +1110,8 @@ class SystemService(
                     type = PendingActionType.CREATE_GROUP,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), body),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -1083,10 +1134,12 @@ class SystemService(
                 Result.success(group)
             } else {
                 val errorBody = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to create group: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val group = MemberGroup(
                     id = actionId,
                     name = body.name,
@@ -1125,7 +1178,8 @@ class SystemService(
                     memberId = groupId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -1141,10 +1195,12 @@ class SystemService(
                 removeGroupFromCache(groupId)
                 Result.success(Unit)
             } else {
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to delete group: ${response.status}"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 removeGroupFromCache(groupId)
                 Result.success(Unit)
             } else Result.failure(e)
@@ -1170,7 +1226,8 @@ class SystemService(
                     memberId = memberId,
                     jsonPayload = json.encodeToString(UpdateMemberGroupsDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
-                )
+                ),
+                trigger = false
             )
         }
 
@@ -1190,10 +1247,12 @@ class SystemService(
                 Result.success(member)
             } else {
                 val error = response.bodyAsText()
+                if (actionId != null) triggerSync()
                 Result.failure(Exception("Failed to update member groups: ${response.status} - $error"))
             }
         } catch (e: Exception) {
             if (actionId != null) {
+                triggerSync()
                 val current = offlineManager.getCachedMembers()?.find { it.id == memberId }
                 if (current != null) {
                     val updated = current.copy(groups = groupIds.map { MemberGroupLink(it) })
@@ -1215,10 +1274,16 @@ class SystemService(
         }
     }
 
-    suspend fun deleteMemberGroups(memberId: String, groupIds: List<String>): Result<MemberResponse> {
+    suspend fun deleteMemberGroups(memberId: String, groupIds: List<String>, fromSync: Boolean = false): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
         val url = "https://$federation/v1/system/@me/members/$memberId/groups"
         val dto = UpdateMemberGroupsDto(groupIds)
+        
+        // Use UPDATE_MEMBER_GROUPS type but handle it as a deletion logic if needed, 
+        // or just use the same optimistic logic since it's a "set" operation in the end usually.
+        // For simplicity and since the API seems to take a list of IDs to REMOVE or SET, 
+        // let's look at the implementation. The POST/PUT/DELETE usually have different semantics.
+        
         return try {
             val response = client.delete(url) {
                 getHeaders(this)
@@ -1226,7 +1291,7 @@ class SystemService(
                 setBody(dto)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return deleteMemberGroups(memberId, groupIds)
+                if (authService.refreshToken().isSuccess) return deleteMemberGroups(memberId, groupIds, fromSync)
             }
             if (response.status.isSuccess()) {
                 val member = response.body<MemberResponse>()

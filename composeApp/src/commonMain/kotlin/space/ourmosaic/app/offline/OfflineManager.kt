@@ -81,6 +81,9 @@ class OfflineManager(private val settings: Settings = Settings()) {
     private val _syncTrigger = MutableStateFlow(0L)
     val syncTrigger: StateFlow<Long> = _syncTrigger.asStateFlow()
 
+    private val _idMappings = MutableStateFlow(getIdMappings())
+    val idMappings: StateFlow<Map<String, String>> = _idMappings.asStateFlow()
+
     private val _blockedUsers = MutableStateFlow<List<space.ourmosaic.app.system.BlockedUserResponse>?>(null)
     val cachedBlockedUsers: Flow<List<space.ourmosaic.app.system.BlockedUserResponse>> = _blockedUsers
         .map { it ?: getCachedBlockedUsers() ?: emptyList() }
@@ -112,9 +115,8 @@ class OfflineManager(private val settings: Settings = Settings()) {
         .distinctUntilChanged()
 
     private val _serverFrontSessions = MutableStateFlow<List<FrontSession>?>(null)
-    val cachedFrontSessions: Flow<List<FrontSession>?> = combine(_serverFrontSessions, _pendingActions) { serverSessions, actions ->
+    val cachedFrontSessions: Flow<List<FrontSession>?> = combine(_serverFrontSessions, _pendingActions, _idMappings) { serverSessions, actions, mappings ->
         val sessions = serverSessions ?: getCachedFrontSessions() ?: emptyList()
-        val mappings = getIdMappings()
         
         // Use a set for faster lookup of local IDs that already have a server representation
         val localIdsRepresentedByServer = sessions.mapNotNull { mappings[it.id] }.toSet()
@@ -194,10 +196,9 @@ class OfflineManager(private val settings: Settings = Settings()) {
     }.distinctUntilChanged()
 
     private val _serverMembers = MutableStateFlow<List<MemberResponse>?>(null)
-    val cachedMembers: Flow<List<MemberResponse>?> = combine(_serverMembers, cachedFrontSessions, _pendingActions) { members, frontSessions, actions ->
+    val cachedMembers: Flow<List<MemberResponse>?> = combine(_serverMembers, cachedFrontSessions, _pendingActions, _idMappings) { members, frontSessions, actions, mappings ->
         val baseMembers = members ?: getCachedMembers() ?: emptyList()
         val sessions = frontSessions ?: emptyList()
-        val mappings = getIdMappings()
         
         // Identify local IDs that are already represented by a server response
         val localIdsRepresentedByServer = baseMembers.mapNotNull { mappings[it.id] }.toSet()
@@ -212,7 +213,13 @@ class OfflineManager(private val settings: Settings = Settings()) {
         actions.filter { it.type == PendingActionType.CREATE_MEMBER }.forEach { action ->
             try {
                 val dto = json.decodeFromString(space.ourmosaic.app.system.CreateMemberDto.serializer(), action.jsonPayload)
-                if (result.none { it.id == action.id } && !localIdsRepresentedByServer.contains(action.id)) {
+                
+                // Content-based de-duplication: check if a server member with same name/pronouns already exists
+                val isDuplicateByContent = result.any { 
+                    !it.id.contains("_") && it.name == dto.name && it.pronouns == dto.pronouns
+                }
+
+                if (result.none { it.id == action.id } && !localIdsRepresentedByServer.contains(action.id) && !isDuplicateByContent) {
                     result.add(MemberResponse(
                         id = action.id,
                         name = dto.name,
@@ -346,10 +353,9 @@ class OfflineManager(private val settings: Settings = Settings()) {
     }.distinctUntilChanged()
 
     private val _serverGroups = MutableStateFlow<List<space.ourmosaic.app.system.MemberGroup>?>(null)
-    val cachedGroups: Flow<List<space.ourmosaic.app.system.MemberGroup>?> = combine(_serverGroups, _pendingActions) { groups, actions ->
+    val cachedGroups: Flow<List<space.ourmosaic.app.system.MemberGroup>?> = combine(_serverGroups, _pendingActions, _idMappings) { groups, actions, mappings ->
         val baseGroups = groups ?: getCachedGroups() ?: emptyList()
         val result = baseGroups.toMutableList()
-        val mappings = getIdMappings()
         
         val localIdsRepresentedByServer = baseGroups.mapNotNull { mappings[it.id] }.toSet()
 
@@ -357,7 +363,14 @@ class OfflineManager(private val settings: Settings = Settings()) {
         actions.filter { it.type == PendingActionType.CREATE_GROUP }.forEach { action ->
             try {
                 val dto = json.decodeFromString(space.ourmosaic.app.system.CreateGroupDto.serializer(), action.jsonPayload)
-                if (result.none { it.id == action.id } && !localIdsRepresentedByServer.contains(action.id)) {
+                
+                // Content-based de-duplication: check if a server group with same name and parent exists
+                val resolvedParentId = resolveId(dto.parentId, mappings)
+                val isDuplicateByContent = result.any {
+                    !it.id.contains("_") && it.name == dto.name && it.parentId == resolvedParentId
+                }
+
+                if (result.none { it.id == action.id } && !localIdsRepresentedByServer.contains(action.id) && !isDuplicateByContent) {
                     result.add(space.ourmosaic.app.system.MemberGroup(
                         id = action.id,
                         name = dto.name,
@@ -399,10 +412,9 @@ class OfflineManager(private val settings: Settings = Settings()) {
     }.distinctUntilChanged()
 
     private val _serverCustomFields = MutableStateFlow<List<CustomField>?>(null)
-    val cachedCustomFields: Flow<List<CustomField>?> = combine(_serverCustomFields, _pendingActions) { fields, actions ->
+    val cachedCustomFields: Flow<List<CustomField>?> = combine(_serverCustomFields, _pendingActions, _idMappings) { fields, actions, mappings ->
         val baseFields = fields ?: getCachedCustomFields() ?: emptyList()
         val result = baseFields.toMutableList()
-        val mappings = getIdMappings()
         
         val localIdsRepresentedByServer = baseFields.mapNotNull { mappings[it.id] }.toSet()
 
@@ -414,6 +426,13 @@ class OfflineManager(private val settings: Settings = Settings()) {
                         json.decodeFromString(UpdateCustomFieldDefinitionDto.serializer(), action.jsonPayload)
                     } else null
                     
+                    // Content-based de-duplication: avoid duplicates if a server field with same name/type already exists
+                    val isDuplicateByContent = dto != null && result.any {
+                        !it.id.contains("_") && it.name == dto.name && it.type == dto.type
+                    }
+
+                    if (isDuplicateByContent) return@forEach
+
                     val maxOrder = result.maxOfOrNull { it.order } ?: -1
                     result.add(CustomField(
                         id = action.id,
@@ -499,14 +518,14 @@ class OfflineManager(private val settings: Settings = Settings()) {
         _pendingActionsCount.value = getPendingActions().size
     }
 
-    fun queueAction(action: PendingAction) {
+    fun queueAction(action: PendingAction, trigger: Boolean = true) {
         space.ourmosaic.app.utils.Logger.d("OfflineManager", "Queueing action: Type=${action.type}, ID=${action.id}")
         val current = getPendingActions().toMutableList()
         current.add(action)
         saveActions(current)
         _pendingActions.value = current
         _pendingActionsCount.value = current.size
-        triggerSync()
+        if (trigger) triggerSync()
     }
 
     fun getPendingActions(): List<PendingAction> {
@@ -764,6 +783,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
         val current = getIdMappings().toMutableMap()
         current[serverId] = localId
         settings[ID_MAPPING_KEY] = json.encodeToString(MapSerializer(String.serializer(), String.serializer()), current)
+        _idMappings.value = current
     }
 
     fun getLocalId(serverId: String): String? {
