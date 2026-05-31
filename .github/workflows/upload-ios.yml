@@ -20,15 +20,29 @@ jobs:
           # Utilise la CLI GitHub native pour télécharger l'artefact
           gh release download ${{ inputs.release_tag }} --pattern "Mosaic.ipa" --dir ipa_folder --repo ${{ github.repository }}
 
-      - name: Send to TestFlight via Fastlane
+      - name: Envoyer sur TestFlight via Fastlane
         env:
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
         run: |
-          echo -n "${{ secrets.APPSTORE_PRIVATE_KEY_BASE64 }}" | base64 --decode > AuthKey.p8
-          export APP_STORE_CONNECT_API_KEY_KEY_FILEPATH="$PWD/AuthKey.p8"
-          
-          fastlane pilot upload \
-            --ipa ipa_folder/Mosaic.ipa \
-            --skip_submission true \
-            --skip_waiting_for_build_processing true
+            echo -n "${{ secrets.APPSTORE_PRIVATE_KEY_BASE64 }}" | base64 --decode > AuthKey.p8
+            
+            mkdir -p fastlane
+            cat <<EOF > fastlane/Fastfile
+            lane :upload_beta do
+              app_store_connect_api_key(
+                key_id: ENV["APPSTORE_KEY_ID"],
+                issuer_id: ENV["APPSTORE_ISSUER_ID"],
+                key_filepath: "$PWD/AuthKey.p8",
+                in_house: false
+              )
+            
+              upload_to_testflight(
+                ipa: "$PWD/ipa_folder/Mosaic.ipa",
+                skip_submission: true,
+                skip_waiting_for_build_processing: true
+              )
+            end
+            EOF
+            
+            fastlane upload_beta
