@@ -30,9 +30,9 @@ jobs:
         uses: ilharp/sign-android-release@v1
         id: sign_app
         with:
-          releaseDirectory: composeApp/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          alias: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          releaseDir: composeApp/build/outputs/apk/release
+          signingKey: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          keyAlias: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
@@ -111,6 +111,8 @@ jobs:
                      -archivePath $PWD/build/Mosaic.xcarchive \
                      DEVELOPMENT_TEAM="88KUPU5378" \
                      CODE_SIGN_STYLE="Manual" \
+                     PROVISIONING_PROFILE_SPECIFIER="${{ secrets.PROVISIONING_PROFILE_NAME }}" \
+                     CODE_SIGN_IDENTITY="iPhone Distribution" \
                      clean archive
 
       - name: Export .ipa
