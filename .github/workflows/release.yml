@@ -27,7 +27,7 @@ jobs:
         run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease
 
       - name: Sign Android Release
-        uses: r0adkll/sign-android-release@v1
+        uses: ilharp/sign-android-release@v1
         id: sign_app
         with:
           releaseDirectory: composeApp/build/outputs/apk/release
@@ -35,7 +35,6 @@ jobs:
           alias: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          buildToolsVersion: 34.0.0
 
       - name: Upload Android Artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
