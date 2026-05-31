@@ -88,8 +88,8 @@ android {
         applicationId = "space.ourmosaic.app"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 6
-        versionName = "0.0.12-canary"
+        versionCode = 8
+        versionName = "0.0.13-canary"
     }
     packaging {
         resources {

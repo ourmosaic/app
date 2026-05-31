@@ -1563,7 +1563,7 @@ class SystemService(
         }
     }
 
-    suspend fun updateFriendshipPermissions(friendId: String, dto: UpdateFriendshipPermissionsDto): Result<FriendshipResponse> {
+    suspend fun updateFriendshipPermissions(friendId: String, dto: UpdateFriendshipPermissionsDto): Result<UpdateFriendshipPermissionsDto> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
         val url = "https://$federation/v1/friendship/$friendId/permissions"
         return try {
@@ -1576,9 +1576,10 @@ class SystemService(
                 if (authService.refreshToken().isSuccess) return updateFriendshipPermissions(friendId, dto)
             }
             if (response.status.isSuccess()) {
-                Result.success(response.body())
+                Result.success(dto)
             } else {
-                Result.failure(Exception("Failed to update friendship permissions: ${response.status}"))
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Failed to update friendship permissions: ${response.status} - $errorBody"))
             }
         } catch (e: Exception) {
             Result.failure(e)
