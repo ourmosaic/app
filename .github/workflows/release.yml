@@ -114,6 +114,11 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION_NAME" iosApp/iosApp/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION_CODE" iosApp/iosApp/Info.plist
 
+      - name: Force last Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
       - name: Build & Archive Xcode Project
         run: |
           cd iosApp
