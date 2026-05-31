@@ -3,10 +3,22 @@
 <plist version="1.0">
 <dict>
     <key>method</key>
-    <string>app-store</string>
+    <string>app-store-connect</string>
 
     <key>teamID</key>
     <string>88KUPU5378</string>
+
+    <key>signingStyle</key>
+    <string>manual</string>
+
+    <key>signingCertificate</key>
+    <string>Apple Distribution</string>
+
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>space.ourmosaic.app</key>
+        <string>Mosaic - Beta</string>
+    </dict>
 
     <key>uploadSymbols</key>
     <true/>
