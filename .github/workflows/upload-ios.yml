@@ -1,0 +1,34 @@
+name: Upload iOS to TestFlight (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag'
+        required: true
+        type: string
+
+jobs:
+  upload:
+    runs-on: macos-latest
+    steps:
+      - name: Download .ipa from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ipa_folder
+          # Utilise la CLI GitHub native pour télécharger l'artefact
+          gh release download ${{ inputs.release_tag }} --pattern "Mosaic.ipa" --dir ipa_folder --repo ${{ github.repository }}
+
+      - name: Send to TestFlight via Fastlane
+        env:
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          echo -n "${{ secrets.APPSTORE_PRIVATE_KEY_BASE64 }}" | base64 --decode > AuthKey.p8
+          export APP_STORE_CONNECT_API_KEY_KEY_FILEPATH="$PWD/AuthKey.p8"
+          
+          fastlane pilot upload \
+            --ipa ipa_folder/Mosaic.ipa \
+            --skip_submission true \
+            --skip_waiting_for_build_processing true
