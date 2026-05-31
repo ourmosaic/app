@@ -26,6 +26,9 @@ jobs:
       - name: Build Android Release
         run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Sign Android Release
         uses: ilharp/sign-android-release@v1
         id: sign_app
