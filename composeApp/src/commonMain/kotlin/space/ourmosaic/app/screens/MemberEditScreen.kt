@@ -13,8 +13,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
@@ -53,7 +56,15 @@ import space.ourmosaic.app.utils.ColorUtils
 import space.ourmosaic.app.components.MosaicAvatar
 import space.ourmosaic.app.components.ImageCropperDialog
 import space.ourmosaic.app.components.ColorPickerDialog
+import space.ourmosaic.app.components.DatePickerDialog
+import space.ourmosaic.app.components.DayMonthPickerDialog
+import space.ourmosaic.app.components.MonthYearPickerDialog
+import space.ourmosaic.app.components.DateTimePickerDialog
 import space.ourmosaic.app.offline.OfflineManager
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.datetime.format.char
 
 
 @Composable
@@ -65,31 +76,58 @@ fun GroupTreeItem(
     level: Int = 0
 ) {
     val children = allGroups.filter { it.parentId == group.id }
+    var isExpanded by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.padding(start = (level * 16).dp)) {
+    Column(modifier = Modifier.padding(start = (level * 12).dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onToggle(group.id) }
-                .padding(vertical = 4.dp),
+                .clickable { 
+                    if (children.isNotEmpty()) isExpanded = !isExpanded 
+                    else onToggle(group.id)
+                }
+                .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (children.isNotEmpty()) {
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ArrowDropDown else Icons.AutoMirrored.Filled.ArrowRight,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(32.dp))
+            }
+
             Checkbox(
                 checked = selectedGroupIds.contains(group.id),
                 onCheckedChange = { onToggle(group.id) }
             )
-            Spacer(Modifier.width(8.dp))
-            Text(group.name ?: "Unnamed Group", style = MaterialTheme.typography.bodyLarge)
+            
+            Spacer(Modifier.width(4.dp))
+            
+            Text(
+                text = group.name ?: "Unnamed Group",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
+            )
         }
 
-        children.forEach { child ->
-            GroupTreeItem(
-                group = child,
-                allGroups = allGroups,
-                selectedGroupIds = selectedGroupIds,
-                onToggle = onToggle,
-                level = level + 1
-            )
+        if (isExpanded) {
+            children.forEach { child ->
+                GroupTreeItem(
+                    group = child,
+                    allGroups = allGroups,
+                    selectedGroupIds = selectedGroupIds,
+                    onToggle = onToggle,
+                    level = level + 1
+                )
+            }
         }
     }
 }
@@ -124,7 +162,15 @@ fun MemberEditScreen(
     var selectedGroupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var initialGroupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showColorPicker by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showDayMonthPicker by remember { mutableStateOf(false) }
+    var showMonthYearPicker by remember { mutableStateOf(false) }
+    var showDateTimePicker by remember { mutableStateOf(false) }
     var editingColorFieldId by remember { mutableStateOf<String?>(null) } // null = main member color, otherwise = custom field ID
+    var editingDateFieldId by remember { mutableStateOf<String?>(null) }
+    var editingDayMonthFieldId by remember { mutableStateOf<String?>(null) }
+    var editingMonthYearFieldId by remember { mutableStateOf<String?>(null) }
+    var editingDateTimeFieldId by remember { mutableStateOf<String?>(null) }
 
     val allGroups = offlineManager.cachedGroups.collectAsState(emptyList()).value ?: emptyList()
     val customFields = offlineManager.cachedCustomFields.collectAsState(emptyList()).value ?: emptyList()
@@ -390,6 +436,7 @@ fun MemberEditScreen(
                     ColorPickerDialog(
                         initialColor = initialColor,
                         onDismiss = { showColorPicker = false },
+                        i18n = i18n,
                         onColorSelected = { newColor ->
                             if (editingColorFieldId == null) {
                                 colorHex = newColor
@@ -399,6 +446,67 @@ fun MemberEditScreen(
                                 }
                             }
                             showColorPicker = false
+                        }
+                    )
+                }
+
+                if (showDatePicker) {
+                    val initialValue = fieldValues[editingDateFieldId!!]
+
+                    DatePickerDialog(
+                        initialValue = initialValue,
+                        onDismiss = { showDatePicker = false },
+                        i18n = i18n,
+                        onValueSelected = { isoString: String ->
+                            fieldValues = fieldValues.toMutableMap().apply {
+                                put(editingDateFieldId!!, isoString)
+                            }
+                            showDatePicker = false
+                        }
+                    )
+                }
+
+                if (showDayMonthPicker) {
+                    val initialValue = fieldValues[editingDayMonthFieldId!!]
+                    DayMonthPickerDialog(
+                        initialValue = initialValue,
+                        onDismiss = { showDayMonthPicker = false },
+                        i18n = i18n,
+                        onValueSelected = { newValue: String ->
+                            fieldValues = fieldValues.toMutableMap().apply {
+                                put(editingDayMonthFieldId!!, newValue)
+                            }
+                            showDayMonthPicker = false
+                        }
+                    )
+                }
+
+                if (showMonthYearPicker) {
+                    val initialValue = fieldValues[editingMonthYearFieldId!!]
+                    MonthYearPickerDialog(
+                        initialValue = initialValue,
+                        onDismiss = { showMonthYearPicker = false },
+                        i18n = i18n,
+                        onValueSelected = { newValue: String ->
+                            fieldValues = fieldValues.toMutableMap().apply {
+                                put(editingMonthYearFieldId!!, newValue)
+                            }
+                            showMonthYearPicker = false
+                        }
+                    )
+                }
+
+                if (showDateTimePicker) {
+                    val initialValue = fieldValues[editingDateTimeFieldId!!]
+                    DateTimePickerDialog(
+                        initialValue = initialValue,
+                        onDismiss = { showDateTimePicker = false },
+                        i18n = i18n,
+                        onValueSelected = { newValue: String ->
+                            fieldValues = fieldValues.toMutableMap().apply {
+                                put(editingDateTimeFieldId!!, newValue)
+                            }
+                            showDateTimePicker = false
                         }
                     )
                 }
@@ -520,6 +628,133 @@ fun MemberEditScreen(
                                                 showColorPicker = true
                                             }
                                     )
+                                }
+                            )
+                        } else if (field.type == FieldType.DATE) {
+                            val dateText = try {
+                                value.let {
+                                    val instant = Instant.parse(it)
+                                    val dateTime = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+                                    "${dateTime.dayOfMonth}/${dateTime.monthNumber}/${dateTime.year}"
+                                }
+                            } catch (e: Exception) {
+                                ""
+                            }
+
+                            OutlinedTextField(
+                                value = dateText,
+                                onValueChange = { },
+                                label = { Text(field.name) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingDateFieldId = field.id
+                                        showDatePicker = true
+                                    },
+                                readOnly = true,
+                                enabled = false,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                ),
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        editingDateFieldId = field.id
+                                        showDatePicker = true
+                                    }) {
+                                        Icon(Icons.Default.Event, null)
+                                    }
+                                }
+                            )
+                        } else if (field.type == FieldType.DATE_DAY_MONTH) {
+                            OutlinedTextField(
+                                value = value,
+                                onValueChange = { },
+                                label = { Text(field.name) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingDayMonthFieldId = field.id
+                                        showDayMonthPicker = true
+                                    },
+                                readOnly = true,
+                                enabled = false,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                ),
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        editingDayMonthFieldId = field.id
+                                        showDayMonthPicker = true
+                                    }) {
+                                        Icon(Icons.Default.Event, null)
+                                    }
+                                }
+                            )
+                        } else if (field.type == FieldType.DATE_MONTH_YEAR) {
+                            OutlinedTextField(
+                                value = value,
+                                onValueChange = { },
+                                label = { Text(field.name) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingMonthYearFieldId = field.id
+                                        showMonthYearPicker = true
+                                    },
+                                readOnly = true,
+                                enabled = false,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                ),
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        editingMonthYearFieldId = field.id
+                                        showMonthYearPicker = true
+                                    }) {
+                                        Icon(Icons.Default.Event, null)
+                                    }
+                                }
+                            )
+                        } else if (field.type == FieldType.DATETIME) {
+                            val dateText = try {
+                                value.let {
+                                    val instant = Instant.parse(it)
+                                    val dateTime = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+                                    "${dateTime.dayOfMonth}/${dateTime.monthNumber}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padStart(2, '0')}"
+                                }
+                            } catch (e: Exception) {
+                                ""
+                            }
+                            OutlinedTextField(
+                                value = dateText,
+                                onValueChange = { },
+                                label = { Text(field.name) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingDateTimeFieldId = field.id
+                                        showDateTimePicker = true
+                                    },
+                                readOnly = true,
+                                enabled = false,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                ),
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        editingDateTimeFieldId = field.id
+                                        showDateTimePicker = true
+                                    }) {
+                                        Icon(Icons.Default.Event, null)
+                                    }
                                 }
                             )
                         } else {

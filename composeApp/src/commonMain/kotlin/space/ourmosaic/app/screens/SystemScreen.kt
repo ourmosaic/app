@@ -291,6 +291,7 @@ fun SystemScreen(
                     if (showColorPicker) {
                         space.ourmosaic.app.components.ColorPickerDialog(
                             initialColor = colorHex,
+                            i18n = i18n,
                             onColorSelected = { 
                                 colorHex = it
                                 showColorPicker = false 
@@ -384,12 +385,30 @@ fun SystemScreen(
 }
 
 @Composable
+fun FieldType.toDisplayName(i18n: I18nState): String {
+    val key = when (this) {
+        FieldType.STRING -> MessageKey.FieldTypeString
+        FieldType.LONG_TEXT -> MessageKey.FieldTypeLongText
+        FieldType.COLOR -> MessageKey.FieldTypeColor
+        FieldType.DATE -> MessageKey.FieldTypeDate
+        FieldType.NUMBER -> MessageKey.FieldTypeNumber
+        FieldType.DATE_DAY_MONTH -> MessageKey.FieldTypeDateDayMonth
+        FieldType.DATETIME -> MessageKey.FieldTypeDateTime
+        FieldType.DATE_MONTH_YEAR -> MessageKey.FieldTypeDateMonthYear
+    }
+    return i18n.text(key)
+}
+
+@Composable
 fun FieldTypeIcon(type: FieldType, tint: Color = LocalContentColor.current) {
     val icon = when (type) {
         FieldType.STRING -> Icons.Default.TextFields
         FieldType.LONG_TEXT -> Icons.AutoMirrored.Filled.Notes
         FieldType.COLOR -> Icons.Default.Palette
-        FieldType.DATE -> Icons.Default.Event
+        FieldType.DATE, 
+        FieldType.DATE_DAY_MONTH, 
+        FieldType.DATE_MONTH_YEAR, 
+        FieldType.DATETIME -> Icons.Default.Event
         FieldType.NUMBER -> Icons.Default.Numbers
     }
     Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = tint)
@@ -434,12 +453,12 @@ fun CustomFieldItem(
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = field.name.ifBlank { "(Sans nom)" },
+                            text = field.name.ifBlank { i18n.text(MessageKey.CustomFieldNoName) },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${field.type} • ${field.privacy}",
+                            text = "${field.type.toDisplayName(i18n)} • ${field.privacy}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -492,13 +511,13 @@ fun CustomFieldItem(
                         ) {
                             FieldTypeIcon(localType)
                             Spacer(Modifier.width(8.dp))
-                            Text(localType.name, style = MaterialTheme.typography.bodySmall)
+                            Text(localType.toDisplayName(i18n), style = MaterialTheme.typography.bodySmall)
                         }
                         DropdownMenu(expanded = showTypeMenu, onDismissRequest = { showTypeMenu = false }) {
                             FieldType.entries.forEach { type ->
                                 DropdownMenuItem(
                                     leadingIcon = { FieldTypeIcon(type) },
-                                    text = { Text(type.name) },
+                                    text = { Text(type.toDisplayName(i18n)) },
                                     onClick = {
                                         localType = type
                                         showTypeMenu = false

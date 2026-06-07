@@ -544,7 +544,7 @@ class SystemService(
         }
 
         return try {
-            val response = client.post(url) {
+            val response = client.patch(url) {
                 getHeaders(this)
                 setBody(MultiPartFormDataContent(
                     formData {

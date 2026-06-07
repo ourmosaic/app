@@ -235,6 +235,15 @@ private val englishMessages = mapOf(
     MessageKey.BulkActionDormancy to "Toggle Dormancy",
     MessageKey.BulkActionFront to "Toggle Front",
     MessageKey.BulkActionDelete to "Delete Members",
+    MessageKey.FieldTypeString to "Short Text",
+    MessageKey.FieldTypeLongText to "Long Text",
+    MessageKey.FieldTypeColor to "Color",
+    MessageKey.FieldTypeDate to "Date",
+    MessageKey.FieldTypeNumber to "Number",
+    MessageKey.FieldTypeDateDayMonth to "Day & Month",
+    MessageKey.FieldTypeDateTime to "Date & Time",
+    MessageKey.FieldTypeDateMonthYear to "Month & Year",
+    MessageKey.CustomFieldNoName to "(No name)",
 )
 
 private val frenchMessages = mapOf(
@@ -403,4 +412,13 @@ private val frenchMessages = mapOf(
     MessageKey.BulkActionDormancy to "Basculer la dormance",
     MessageKey.BulkActionFront to "Basculer le front",
     MessageKey.BulkActionDelete to "Supprimer les membres",
+    MessageKey.FieldTypeString to "Texte court",
+    MessageKey.FieldTypeLongText to "Texte long",
+    MessageKey.FieldTypeColor to "Couleur",
+    MessageKey.FieldTypeDate to "Date",
+    MessageKey.FieldTypeNumber to "Nombre",
+    MessageKey.FieldTypeDateDayMonth to "Jour & Mois",
+    MessageKey.FieldTypeDateTime to "Date & Heure",
+    MessageKey.FieldTypeDateMonthYear to "Mois & Année",
+    MessageKey.CustomFieldNoName to "(Sans nom)",
 )

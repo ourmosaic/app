@@ -569,6 +569,7 @@ fun MembersManageScreen(
                     if (showColorPicker) {
                         space.ourmosaic.app.components.ColorPickerDialog(
                             initialColor = groupColor,
+                            i18n = i18n,
                             onColorSelected = { 
                                 groupColor = it
                                 showColorPicker = false 
@@ -651,6 +652,7 @@ fun MembersManageScreen(
                     if (showColorPicker) {
                         space.ourmosaic.app.components.ColorPickerDialog(
                             initialColor = groupColor,
+                            i18n = i18n,
                             onColorSelected = { 
                                 groupColor = it
                                 showColorPicker = false 

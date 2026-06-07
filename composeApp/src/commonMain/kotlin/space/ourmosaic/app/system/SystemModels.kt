@@ -9,7 +9,7 @@ enum class PrivacyLevel {
 
 @Serializable
 enum class FieldType {
-    STRING, LONG_TEXT, COLOR, DATE, NUMBER
+    STRING, LONG_TEXT, COLOR, DATE, NUMBER, DATE_DAY_MONTH, DATETIME, DATE_MONTH_YEAR
 }
 
 @Serializable

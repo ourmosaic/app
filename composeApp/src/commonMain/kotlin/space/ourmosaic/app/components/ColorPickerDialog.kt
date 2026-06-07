@@ -3,7 +3,6 @@ package space.ourmosaic.app.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,20 +13,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.github.skydoves.colorpicker.compose.HsvColorPicker
 import com.github.skydoves.colorpicker.compose.rememberColorPickerController
+import com.github.skydoves.colorpicker.compose.BrightnessSlider
 import space.ourmosaic.app.utils.ColorUtils
+import space.ourmosaic.app.i18n.I18nState
+import space.ourmosaic.app.i18n.MessageKey
 
 @Composable
 fun ColorPickerDialog(
     initialColor: String,
     onDismiss: () -> Unit,
-    onColorSelected: (String) -> Unit
+    onColorSelected: (String) -> Unit,
+    i18n: I18nState,
+    title: String = i18n.text(MessageKey.SystemColorLabel),
+    confirmText: String = i18n.text(MessageKey.CommonSave),
+    dismissText: String = i18n.text(MessageKey.CommonCancel)
 ) {
     val controller = rememberColorPickerController()
     var selectedColor by remember { mutableStateOf(ColorUtils.parseHexColor(initialColor)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choisir une couleur") },
+        title = { Text(title) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -35,7 +41,7 @@ fun ColorPickerDialog(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(80.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(selectedColor)
                         .border(2.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
@@ -44,12 +50,21 @@ fun ColorPickerDialog(
                 HsvColorPicker(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(250.dp)
+                        .height(200.dp)
                         .padding(10.dp),
                     controller = controller,
                     onColorChanged = { colorEnvelope ->
                         selectedColor = colorEnvelope.color
                     },
+                    initialColor = ColorUtils.parseHexColor(initialColor)
+                )
+
+                BrightnessSlider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(35.dp)
+                        .padding(10.dp),
+                    controller = controller,
                     initialColor = ColorUtils.parseHexColor(initialColor)
                 )
                 
@@ -63,12 +78,12 @@ fun ColorPickerDialog(
             TextButton(onClick = { 
                 onColorSelected("#${selectedColorToHex(selectedColor)}")
             }) {
-                Text("Confirmer")
+                Text(confirmText)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Annuler")
+                Text(dismissText)
             }
         }
     )

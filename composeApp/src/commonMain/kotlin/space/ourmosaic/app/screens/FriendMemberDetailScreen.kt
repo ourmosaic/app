@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.Report
 import space.ourmosaic.app.system.*
 import space.ourmosaic.app.utils.ColorUtils
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,8 +179,19 @@ fun FriendMemberDetailScreen(
                                     )
                                     Spacer(Modifier.width(8.dp))
                                 }
+                                
+                                val displayText = if (field.customField?.type == space.ourmosaic.app.system.FieldType.DATE) {
+                                    field.value.toLongOrNull()?.let {
+                                        val instant = Instant.fromEpochMilliseconds(it)
+                                        val dateTime = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+                                        "${dateTime.dayOfMonth}/${dateTime.monthNumber}/${dateTime.year}"
+                                    } ?: field.value
+                                } else {
+                                    field.value
+                                }
+
                                 Text(
-                                    text = field.value,
+                                    text = displayText,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                             }

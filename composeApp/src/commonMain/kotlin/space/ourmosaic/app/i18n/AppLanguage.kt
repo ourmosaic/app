@@ -175,5 +175,14 @@ enum class MessageKey {
     BulkActionDormancy,
     BulkActionFront,
     BulkActionDelete,
+    FieldTypeString,
+    FieldTypeLongText,
+    FieldTypeColor,
+    FieldTypeDate,
+    FieldTypeNumber,
+    FieldTypeDateDayMonth,
+    FieldTypeDateTime,
+    FieldTypeDateMonthYear,
+    CustomFieldNoName,
 }
 
