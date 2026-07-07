@@ -14,7 +14,7 @@ import space.ourmosaic.app.utils.Logger
 class SseService(private val authService: AuthService) {
     private val tag = "SseService"
     
-    private val json = Json {
+    val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
@@ -31,6 +31,9 @@ class SseService(private val authService: AuthService) {
 
     private val _events = MutableSharedFlow<SseEvent>()
     val events: SharedFlow<SseEvent> = _events.asSharedFlow()
+
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     private var sseJob: Job? = null
     private var currentStreamingUrl: String? = null
@@ -61,8 +64,11 @@ class SseService(private val authService: AuthService) {
                         header(HttpHeaders.Accept, "text/event-stream")
                         header(HttpHeaders.CacheControl, "no-cache")
                         header(HttpHeaders.Connection, "keep-alive")
+                        // Add some default timeout/retry hints if supported by backend
+                        parameter("heartbeat", "true")
                     }) {
                         attempt = 0 // Reset attempt counter on success
+                        _isConnected.value = true
                         Logger.d(tag, "SSE Connection established")
                         incoming.collect { event ->
                             val sseEvent = try {
@@ -85,15 +91,17 @@ class SseService(private val authService: AuthService) {
                                               topic.equals(SseTopics.READY, ignoreCase = true)
 
                             if (!isHeartbeat) {
-                                Logger.d(tag, "Received SSE: $topic")
+                                Logger.d(tag, "Received SSE: $topic -> ${event.data}")
                                 _events.emit(sseEvent)
                             } else {
                                 Logger.d(tag, "Received SSE Heartbeat: $topic")
                             }
                         }
                     }
+                    _isConnected.value = false
                     Logger.d(tag, "SSE Connection closed normally, retrying in 2s...")
                 } catch (e: Exception) {
+                    _isConnected.value = false
                     if (!isActive) break
                     
                     attempt++
@@ -122,5 +130,6 @@ class SseService(private val authService: AuthService) {
         sseJob = null
         currentStreamingUrl = null
         currentToken = null
+        _isConnected.value = false
     }
 }

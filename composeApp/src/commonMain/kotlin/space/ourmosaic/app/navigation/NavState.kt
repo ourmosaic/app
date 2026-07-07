@@ -17,6 +17,12 @@ class NavState(startDestination: Route = Route.Login) {
         backStack.add(route)
     }
 
+    fun replaceLast(route: Route) {
+        if (backStack.isNotEmpty()) {
+            backStack[backStack.lastIndex] = route
+        }
+    }
+
     fun back(): Boolean {
         if (!canGoBack) return false
         backStack.removeAt(backStack.lastIndex)

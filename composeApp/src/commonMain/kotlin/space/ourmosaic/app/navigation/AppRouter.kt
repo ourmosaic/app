@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.LaunchedEffect
@@ -16,10 +17,12 @@ import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.screens.BlockedEntitiesScreen
+import space.ourmosaic.app.screens.CacheDetailScreen
 import space.ourmosaic.app.screens.FriendSystemScreen
 import space.ourmosaic.app.screens.FriendMemberDetailScreen
 import space.ourmosaic.app.screens.FriendsScreen
 import space.ourmosaic.app.screens.HomeScreen
+import space.ourmosaic.app.screens.ChatScreen
 import space.ourmosaic.app.screens.LoginScreen
 import space.ourmosaic.app.screens.ProfileScreen
 import space.ourmosaic.app.screens.SettingsScreen
@@ -43,6 +46,7 @@ fun AppRouter(
     onOpenDrawer: () -> Unit,
     onLogout: () -> Unit,
     systemService: SystemService,
+    chatService: space.ourmosaic.app.system.ChatService,
     sseService: SseService,
     offlineManager: OfflineManager,
     authService: AuthService,
@@ -147,6 +151,34 @@ fun AppRouter(
             systemService = systemService
         )
 
+        Route.CacheDetail -> CacheDetailScreen(
+            i18n = i18n,
+            onBack = navState::back,
+            offlineManager = offlineManager
+        )
+
+        Route.Chat -> ChatScreen(
+            channelId = null,
+            i18n = i18n,
+            onOpenDrawer = onOpenDrawer,
+            onNavigate = { navState.navigateTo(it) },
+            chatService = chatService,
+            systemService = systemService,
+            offlineManager = offlineManager,
+            authService = authService
+        )
+
+        is Route.ChatChannel -> ChatScreen(
+            channelId = (navState.currentRoute as Route.ChatChannel).channelId,
+            i18n = i18n,
+            onOpenDrawer = onOpenDrawer,
+            onNavigate = { navState.navigateTo(it) },
+            chatService = chatService,
+            systemService = systemService,
+            offlineManager = offlineManager,
+            authService = authService
+        )
+
         Route.SetupSystem -> SetupSystemScreen(
             i18n = i18n,
             onSetupComplete = { navState.navigateTo(Route.Home) },
@@ -166,14 +198,21 @@ fun AppRouter(
             onFriendClick = { id -> navState.navigateTo(Route.FriendSystem(id)) }
         )
 
-        is Route.FriendSystem -> FriendSystemScreen(
-            friendId = (navState.currentRoute as Route.FriendSystem).friendId,
-            i18n = i18n,
-            onBack = navState::back,
-            onNavigate = { route -> navState.navigateTo(route) },
-            systemService = systemService,
-            authService = authService
-        )
+        is Route.FriendSystem -> {
+            val route = navState.currentRoute as Route.FriendSystem
+            FriendSystemScreen(
+                friendId = route.friendId,
+                initialPage = route.initialPage,
+                i18n = i18n,
+                onBack = navState::back,
+                onNavigate = { navState.navigateTo(it) },
+                onTabChange = { page ->
+                    navState.replaceLast(Route.FriendSystem(route.friendId, page))
+                },
+                systemService = systemService,
+                authService = authService
+            )
+        }
 
         is Route.MemberDetail -> {
             val memberId = (navState.currentRoute as Route.MemberDetail).memberId

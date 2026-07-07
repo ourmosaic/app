@@ -36,9 +36,11 @@ import space.ourmosaic.app.system.*
 @Composable
 fun FriendSystemScreen(
     friendId: String,
+    initialPage: Int = 0,
     i18n: I18nState,
     onBack: () -> Unit,
     onNavigate: (Route) -> Unit,
+    onTabChange: (Int) -> Unit,
     systemService: SystemService,
     authService: AuthService
 ) {
@@ -46,7 +48,7 @@ fun FriendSystemScreen(
     var allMembers by remember { mutableStateOf<List<MemberResponse>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var showPermissionsDialog by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 2 })
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     
@@ -55,6 +57,10 @@ fun FriendSystemScreen(
 
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(pagerState.currentPage) {
+        onTabChange(pagerState.currentPage)
+    }
 
     suspend fun loadData() {
         isLoading = true

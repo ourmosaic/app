@@ -3,6 +3,9 @@ package space.ourmosaic.app.system
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonObject
@@ -57,19 +60,36 @@ class AppController(
 
         scope.launch {
             combine(offlineManager.cachedFrontSessions, offlineManager.cachedMembers) { sessions, members ->
-                if (appSettings.showFrontNotification && authService.getAccessToken() != null) {
-                    val active = sessions?.filter { it.endTime == null } ?: emptyList()
-                    val m = members ?: emptyList()
-                    val fronters = active.map { session ->
+                val active = sessions?.filter { it.endTime == null } ?: emptyList()
+                val m = members ?: emptyList()
+                
+                // On détecte s'il nous manque des noms de membres pour les sessions actives
+                val hasMissingNames = active.any { session ->
+                    session.member?.name == null && m.none { it.id == session.memberId }
+                }
+                val needsMembers = active.isNotEmpty() && hasMissingNames
+
+                val fronterNames = if (appSettings.showFrontNotification && authService.getAccessToken() != null) {
+                    active.map { session ->
                         session.member?.name 
                             ?: m.find { it.id == session.memberId }?.name 
                             ?: session.memberId 
                     }
-                    updateFrontNotification(fronters)
                 } else {
-                    updateFrontNotification(emptyList())
+                    emptyList()
                 }
-            }.collect {}
+
+                Pair(fronterNames, needsMembers)
+            }
+            .distinctUntilChanged()
+            .collect { (fronterNames, needsMembers) ->
+                if (needsMembers && authService.getAccessToken() != null) {
+                    scope.launch {
+                        systemService.getMembers()
+                    }
+                }
+                updateFrontNotification(fronterNames)
+            }
         }
     }
 
@@ -98,6 +118,10 @@ class AppController(
             }
             SseTopics.REPORTS -> {
                 // Reports are usually handled by moderators, but we might want to refresh something if needed
+            }
+            SseTopics.CHAT_MESSAGE, SseTopics.CHAT_CHANNEL -> {
+                // These are usually handled directly by the ChatScreen if it's active
+                // But we could trigger a global refresh or a notification if needed
             }
         }
     }

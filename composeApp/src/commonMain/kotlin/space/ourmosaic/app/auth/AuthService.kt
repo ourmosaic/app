@@ -34,6 +34,10 @@ class AuthService {
     private val _userMe = MutableStateFlow<UserMeResponse?>(null)
     val userMe: StateFlow<UserMeResponse?> = _userMe.asStateFlow()
 
+    private var memoryAccessToken: String? = null
+    private var memoryRefreshToken: String? = null
+    private var memoryFederation: String? = null
+
     init {
         // Hydrater le StateFlow depuis le cache au démarrage
         val cached = settings.getStringOrNull("cached_user_me")
@@ -203,6 +207,10 @@ class AuthService {
             }
         }
         
+        memoryAccessToken = null
+        memoryRefreshToken = null
+        memoryFederation = null
+
         secureSettings.remove("access_token")
         secureSettings.remove("refresh_token")
         settings.remove("federation")
@@ -216,18 +224,28 @@ class AuthService {
     }
 
     private fun saveAuthData(federation: String, response: AuthenticationResponse) {
-        settings["federation"] = federation
-        secureSettings["access_token"] = response.accessToken
-        secureSettings["refresh_token"] = response.refreshToken
+        memoryFederation = federation
+        memoryAccessToken = response.accessToken
+        memoryRefreshToken = response.refreshToken
+
+        settings.putString("federation", federation)
+        secureSettings.putString("access_token", response.accessToken)
+        secureSettings.putString("refresh_token", response.refreshToken)
+        Logger.d("AuthService", "Auth data saved and cached in memory for federation: $federation")
     }
 
-    fun getFederation(): String? = settings.getStringOrNull("federation")
-    fun getAccessToken(): String? = secureSettings.getStringOrNull("access_token")
-    fun getRefreshToken(): String? = secureSettings.getStringOrNull("refresh_token")
+    fun getFederation(): String? = memoryFederation ?: settings.getStringOrNull("federation")
+    fun getAccessToken(): String? = memoryAccessToken ?: secureSettings.getStringOrNull("access_token")
+    fun getRefreshToken(): String? = memoryRefreshToken ?: secureSettings.getStringOrNull("refresh_token")
 
     suspend fun createSystem(allowRetry: Boolean = true): Result<Unit> {
         val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
-        val token = getAccessToken() ?: return Result.failure(Exception("No access token stored"))
+        val token = getAccessToken()
+        
+        if (token.isNullOrBlank()) {
+            Logger.e("AuthService", "createSystem: Access token is null or empty!")
+            return Result.failure(Exception("No access token stored"))
+        }
 
         return try {
             val response = client.post("https://$federation/v1/system/@me") {

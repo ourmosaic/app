@@ -151,6 +151,8 @@ fun FriendsList(
     onFriendClick: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var friendToRemove by remember { mutableStateOf<SystemResponse?>(null) }
+
     if (friends.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(i18n.text(MessageKey.FriendsEmpty))
@@ -171,21 +173,74 @@ fun FriendsList(
                     },
                     trailingContent = {
                         IconButton(onClick = { 
-                            scope.launch {
-                                val result = systemService.removeFriend(friend.id)
-                                if (result.isSuccess) {
-                                    snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsRemoveSuccess))
-                                } else {
-                                    val error = result.exceptionOrNull()?.message ?: "Unknown error"
-                                    snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsRemoveError, error))
-                                }
-                            }
+                            friendToRemove = friend
                         }) {
                             Icon(Icons.Default.PersonRemove, contentDescription = i18n.text(MessageKey.FriendsRemove), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 )
             }
+        }
+
+        if (friendToRemove != null) {
+            var deleteTapCount by remember { mutableIntStateOf(0) }
+            AlertDialog(
+                onDismissRequest = { 
+                    friendToRemove = null
+                    deleteTapCount = 0
+                },
+                title = { Text(i18n.text(MessageKey.FriendsRemove)) },
+                text = { 
+                    Column {
+                        Text(i18n.text(
+                            MessageKey.FriendsRemoveConfirmText, 
+                            friendToRemove?.customName ?: friendToRemove?.username ?: ""
+                        )) 
+                        if (deleteTapCount > 0) {
+                            LinearProgressIndicator(
+                                progress = { deleteTapCount / 3f },
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            deleteTapCount++
+                            if (deleteTapCount >= 3) {
+                                val id = friendToRemove?.id
+                                if (id != null) {
+                                    scope.launch {
+                                        val result = systemService.removeFriend(id)
+                                        if (result.isSuccess) {
+                                            snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsRemoveSuccess))
+                                        } else {
+                                            val error = result.exceptionOrNull()?.message ?: "Unknown error"
+                                            snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsRemoveError, error))
+                                        }
+                                    }
+                                }
+                                friendToRemove = null
+                                deleteTapCount = 0
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (deleteTapCount >= 2) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(if (deleteTapCount >= 2) i18n.text(MessageKey.CommonDelete) else "${3 - deleteTapCount}...")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { 
+                        friendToRemove = null
+                        deleteTapCount = 0
+                    }) {
+                        Text(i18n.text(MessageKey.CommonCancel))
+                    }
+                }
+            )
         }
     }
 }
@@ -262,6 +317,8 @@ fun SentRequestsList(
     snackbarHostState: SnackbarHostState
 ) {
     val scope = rememberCoroutineScope()
+    var requestToCancel by remember { mutableStateOf<FriendRequestResponse?>(null) }
+
     if (requests.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(i18n.text(MessageKey.FriendsRequestsEmpty))
@@ -282,21 +339,74 @@ fun SentRequestsList(
                     },
                     trailingContent = {
                         IconButton(onClick = { 
-                            scope.launch {
-                                val result = systemService.cancelFriendRequest(request.id)
-                                if (result.isSuccess) {
-                                    snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsCancelSuccess))
-                                } else {
-                                    val error = result.exceptionOrNull()?.message ?: "Unknown error"
-                                    snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsCancelError, error))
-                                }
-                            }
+                            requestToCancel = request
                         }) {
                             Icon(Icons.Default.Close, contentDescription = i18n.text(MessageKey.FriendsCancel), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 )
             }
+        }
+
+        if (requestToCancel != null) {
+            var deleteTapCount by remember { mutableIntStateOf(0) }
+            AlertDialog(
+                onDismissRequest = { 
+                    requestToCancel = null
+                    deleteTapCount = 0
+                },
+                title = { Text(i18n.text(MessageKey.FriendsCancel)) },
+                text = { 
+                    Column {
+                        Text(i18n.text(
+                            MessageKey.FriendsCancelRequestConfirmText, 
+                            requestToCancel?.recipient?.customName ?: requestToCancel?.recipient?.username ?: ""
+                        )) 
+                        if (deleteTapCount > 0) {
+                            LinearProgressIndicator(
+                                progress = { deleteTapCount / 3f },
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            deleteTapCount++
+                            if (deleteTapCount >= 3) {
+                                val id = requestToCancel?.id
+                                if (id != null) {
+                                    scope.launch {
+                                        val result = systemService.cancelFriendRequest(id)
+                                        if (result.isSuccess) {
+                                            snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsCancelSuccess))
+                                        } else {
+                                            val error = result.exceptionOrNull()?.message ?: "Unknown error"
+                                            snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsCancelError, error))
+                                        }
+                                    }
+                                }
+                                requestToCancel = null
+                                deleteTapCount = 0
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (deleteTapCount >= 2) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(if (deleteTapCount >= 2) i18n.text(MessageKey.CommonDelete) else "${3 - deleteTapCount}...")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { 
+                        requestToCancel = null
+                        deleteTapCount = 0
+                    }) {
+                        Text(i18n.text(MessageKey.CommonCancel))
+                    }
+                }
+            )
         }
     }
 }

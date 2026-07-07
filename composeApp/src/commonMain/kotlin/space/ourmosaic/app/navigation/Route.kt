@@ -1,6 +1,7 @@
 package space.ourmosaic.app.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
@@ -23,13 +24,16 @@ sealed class Route(val icon: ImageVector, val titleKey: MessageKey) {
     data object Settings : Route(Icons.Default.Tune, MessageKey.SettingsTitle)
     data object SetupSystem : Route(Icons.Default.Add, MessageKey.SetupSystemTitle)
     data object Friends : Route(Icons.Default.People, MessageKey.FriendsTitle)
-    data class FriendSystem(val friendId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
+    data class FriendSystem(val friendId: String, val initialPage: Int = 0) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data class MemberDetail(val memberId: String) : Route(Icons.Default.AccountCircle, MessageKey.ProfileTitle)
     data class FriendMemberDetail(val friendId: String, val memberId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data object BlockedEntities : Route(Icons.Default.Lock, MessageKey.SafetyBlockedEntities)
+    data object CacheDetail : Route(Icons.Default.Tune, MessageKey.SettingsViewCache)
+    data object Chat : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
+    data class ChatChannel(val channelId: String) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
 
     companion object {
-        val all get() = listOf(Home, Profile, Friends, System, MembersManage, Settings, BlockedEntities)
+        val all get() = listOf(Home, Profile, Friends, Chat, System, MembersManage, Settings, BlockedEntities)
     }
 }
 

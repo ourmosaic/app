@@ -24,7 +24,6 @@ class FrontForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        // On crée une notification par défaut pour satisfaire Android immédiatement
         val notification = createNotification(fronters)
         
         try {
@@ -71,7 +70,7 @@ class FrontForegroundService : Service() {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("Current fronters")
             .setContentText(contentText)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setPriority(NotificationCompat.PRIORITY_LOW) // Changed from MAX to LOW to prevent sound/vibration on updates
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
             .apply {

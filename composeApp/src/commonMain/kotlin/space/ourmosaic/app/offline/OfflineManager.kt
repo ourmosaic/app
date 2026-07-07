@@ -70,6 +70,8 @@ class OfflineManager(private val settings: Settings = Settings()) {
     private val BLOCKED_USERS_CACHE_KEY = "cached_blocked_users"
     private val BLOCKED_MEMBERS_CACHE_KEY = "cached_blocked_members"
     private val BLOCKED_SYSTEMS_CACHE_KEY = "cached_blocked_systems"
+    private val CHAT_CHANNELS_CACHE_KEY = "cached_chat_channels"
+    private val CHAT_MESSAGES_CACHE_PREFIX = "cached_chat_messages_"
 
     private val _pendingActions = MutableStateFlow(getPendingActions())
     private val _pendingActionsCount = MutableStateFlow(_pendingActions.value.size)
@@ -770,6 +772,60 @@ class OfflineManager(private val settings: Settings = Settings()) {
         _serverFrontSessions.value = merged
     }
 
+    fun cacheChatChannels(channels: List<space.ourmosaic.app.system.ChatChannelResponse>) {
+        settings[CHAT_CHANNELS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatChannelResponse.serializer()), channels)
+    }
+
+    fun getCachedChatChannels(): List<space.ourmosaic.app.system.ChatChannelResponse>? {
+        val raw = settings.getStringOrNull(CHAT_CHANNELS_CACHE_KEY) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.ChatChannelResponse.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun cacheChatMessages(channelId: String, messages: List<space.ourmosaic.app.system.ChatMessageResponse>) {
+        settings[CHAT_MESSAGES_CACHE_PREFIX + channelId] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatMessageResponse.serializer()), messages)
+    }
+
+    fun getCachedChatMessages(channelId: String): List<space.ourmosaic.app.system.ChatMessageResponse>? {
+        val raw = settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX + channelId) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.ChatMessageResponse.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun getTotalMessagesCount(): Int {
+        val channels = getCachedChatChannels() ?: return 0
+        return channels.sumOf { getCachedChatMessages(it.id)?.size ?: 0 }
+    }
+
+    fun getEstimatedCacheSize(): Long {
+        var totalSize = 0L
+        val keys = listOf(
+            ACTIONS_KEY, ERRORS_KEY, FIELDS_CACHE_KEY, MEMBERS_CACHE_KEY,
+            GROUPS_CACHE_KEY, FRONT_SESSIONS_CACHE_KEY, ID_MAPPING_KEY,
+            USER_ME_CACHE_KEY, FRIENDS_CACHE_KEY, SENT_REQUESTS_CACHE_KEY,
+            RECEIVED_REQUESTS_CACHE_KEY, BLOCKED_USERS_CACHE_KEY,
+            BLOCKED_MEMBERS_CACHE_KEY, BLOCKED_SYSTEMS_CACHE_KEY,
+            CHAT_CHANNELS_CACHE_KEY
+        )
+        
+        for (key in keys) {
+            totalSize += settings.getStringOrNull(key)?.length?.toLong() ?: 0L
+        }
+
+        // Add chat messages
+        getCachedChatChannels()?.forEach { channel ->
+            totalSize += settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX + channel.id)?.length?.toLong() ?: 0L
+        }
+
+        return totalSize
+    }
+
     fun getCachedFrontSessions(): List<space.ourmosaic.app.system.FrontSession>? {
         val raw = settings.getStringOrNull(FRONT_SESSIONS_CACHE_KEY) ?: return null
         return try {
@@ -835,6 +891,26 @@ class OfflineManager(private val settings: Settings = Settings()) {
         _serverSentRequests.value = null
         _serverReceivedRequests.value = null
         _isImporting.value = false
+    }
+
+    fun getRawJson(key: String): String? {
+        val fullKey = when (key) {
+            "members" -> MEMBERS_CACHE_KEY
+            "groups" -> GROUPS_CACHE_KEY
+            "fields" -> FIELDS_CACHE_KEY
+            "sessions" -> FRONT_SESSIONS_CACHE_KEY
+            "friends" -> FRIENDS_CACHE_KEY
+            "sent_requests" -> SENT_REQUESTS_CACHE_KEY
+            "received_requests" -> RECEIVED_REQUESTS_CACHE_KEY
+            "blocked_users" -> BLOCKED_USERS_CACHE_KEY
+            "blocked_members" -> BLOCKED_MEMBERS_CACHE_KEY
+            "blocked_systems" -> BLOCKED_SYSTEMS_CACHE_KEY
+            "channels" -> CHAT_CHANNELS_CACHE_KEY
+            "actions" -> ACTIONS_KEY
+            "mappings" -> ID_MAPPING_KEY
+            else -> if (key.startsWith("messages_")) CHAT_MESSAGES_CACHE_PREFIX + key.removePrefix("messages_") else null
+        }
+        return if (fullKey != null) settings.getStringOrNull(fullKey) else null
     }
 
     private fun resolveId(id: String?, mappings: Map<String, String>): String? {

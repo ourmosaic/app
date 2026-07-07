@@ -104,15 +104,15 @@ jobs:
       - name: Build iOS Framework (Kotlin pour ARM64)
         run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64
 
-      - name: Sync iOS version with gradle.properties
+      - name: Generate iOS version with gradle.properties
         run: |
           VERSION_NAME=$(grep "mosaic.versionName" gradle.properties | cut -d'=' -f2)
           VERSION_CODE=$(grep "mosaic.versionCode" gradle.properties | cut -d'=' -f2)
           
           echo "iOS -> $VERSION_NAME ($VERSION_CODE)"
           
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION_NAME" iosApp/iosApp/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION_CODE" iosApp/iosApp/Info.plist
+          echo "MARKETING_VERSION=$VERSION_NAME" >> $GITHUB_ENV
+          echo "CURRENT_PROJECT_VERSION=$VERSION_CODE" >> $GITHUB_ENV
 
       - name: Force last Xcode version
         uses: maxim-lobanov/setup-xcode@v1
@@ -131,6 +131,8 @@ jobs:
                      CODE_SIGN_STYLE="Manual" \
                      PROVISIONING_PROFILE_SPECIFIER="${{ secrets.PROVISIONING_PROFILE_NAME }}" \
                      CODE_SIGN_IDENTITY="iPhone Distribution" \
+                     MARKETING_VERSION="$MARKETING_VERSION" \
+                     CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION" \
                      clean archive
 
       - name: Export .ipa

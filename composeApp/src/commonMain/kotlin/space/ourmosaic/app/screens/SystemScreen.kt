@@ -50,6 +50,7 @@ import com.preat.peekaboo.image.picker.rememberImagePickerLauncher
 import com.preat.peekaboo.image.picker.SelectionMode
 import com.preat.peekaboo.image.picker.ResizeOptions
 import space.ourmosaic.app.components.ImageCropperDialog
+import space.ourmosaic.app.components.rememberReorderableState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,13 +74,43 @@ fun SystemScreen(
     
     val pendingCount by offlineManager.pendingActionsCount.collectAsState()
     
-    // Form states
+    
     var customName by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var colorHex by remember { mutableStateOf("") }
     var avatarUpdateTicket by remember { mutableStateOf(0) }
     
     val customFields by offlineManager.cachedCustomFields.collectAsState(emptyList())
+    var localFields by remember { mutableStateOf<List<CustomField>>(emptyList()) }
+    
+    val reorderableState = rememberReorderableState(
+        onMove = { from, to ->
+            localFields = localFields.toMutableList().apply {
+                add(to, removeAt(from))
+            }
+        },
+        onDragEnd = {
+            scope.launch {
+                localFields.forEachIndexed { index, field ->
+                    if (field.order != index) {
+                        systemService.updateCustomField(field.id, UpdateCustomFieldDefinitionDto(order = index))
+                    }
+                }
+            }
+        }
+    )
+
+    LaunchedEffect(localFields) {
+        reorderableState.updateKeys(localFields.map { it.id })
+    }
+
+    LaunchedEffect(customFields) {
+        val fields = customFields
+        if (fields != null && reorderableState.draggedKey == null) {
+            localFields = fields.sortedBy { it.order }
+        }
+    }
+
     val isFieldsLoading = customFields == null
 
     var selectedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
@@ -192,7 +223,7 @@ fun SystemScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Avatar Section
+                
                 Box(
                     modifier = Modifier
                         .size(120.dp)
@@ -345,27 +376,84 @@ fun SystemScreen(
                         }
                     }
 
-                    if (isFieldsLoading && (customFields ?: emptyList()).isEmpty()) {
+                    if (isFieldsLoading && localFields.isEmpty()) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                    } else if ((customFields ?: emptyList()).isEmpty()) {
+                    } else if (localFields.isEmpty()) {
                         Text(
                             i18n.text(MessageKey.CustomFieldEmpty),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        (customFields ?: emptyList()).sortedBy { it.order }.forEach { field ->
-                            CustomFieldItem(
-                                field = field,
-                                i18n = i18n,
-                                onUpdate = { dto ->
-                                    scope.launch {
-                                        systemService.updateCustomField(field.id, dto)
+                        var fieldToDelete by remember { mutableStateOf<CustomField?>(null) }
+
+                        Column {
+                            localFields.forEachIndexed { index, field ->
+                                key(field.id) {
+                                    CustomFieldItem(
+                                        field = field,
+                                        i18n = i18n,
+                                        modifier = with(reorderableState) { Modifier.reorderableItem(index, field.id) },
+                                        onUpdate = { dto ->
+                                            scope.launch {
+                                                systemService.updateCustomField(field.id, dto)
+                                            }
+                                        },
+                                        onDelete = {
+                                            fieldToDelete = field
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (fieldToDelete != null) {
+                            var deleteTapCount by remember { mutableIntStateOf(0) }
+                            AlertDialog(
+                                onDismissRequest = { 
+                                    fieldToDelete = null
+                                    deleteTapCount = 0
+                                },
+                                title = { Text(i18n.text(MessageKey.CustomFieldDelete)) },
+                                text = {
+                                    Column {
+                                        Text(i18n.text(MessageKey.DeleteCustomFieldConfirmText))
+                                        if (deleteTapCount > 0) {
+                                            LinearProgressIndicator(
+                                                progress = { deleteTapCount / 5f },
+                                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                                            )
+                                        }
                                     }
                                 },
-                                onDelete = {
-                                    scope.launch {
-                                        systemService.deleteCustomField(field.id)
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            deleteTapCount++
+                                            if (deleteTapCount >= 5) {
+                                                val id = fieldToDelete?.id
+                                                if (id != null) {
+                                                    scope.launch {
+                                                        systemService.deleteCustomField(id)
+                                                    }
+                                                }
+                                                fieldToDelete = null
+                                                deleteTapCount = 0
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (deleteTapCount >= 4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                        )
+                                    ) {
+                                        Text(if (deleteTapCount >= 4) i18n.text(MessageKey.CommonDelete) else "${5 - deleteTapCount}...")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { 
+                                        fieldToDelete = null
+                                        deleteTapCount = 0
+                                    }) {
+                                        Text(i18n.text(MessageKey.CommonCancel))
                                     }
                                 }
                             )
@@ -418,12 +506,13 @@ fun FieldTypeIcon(type: FieldType, tint: Color = LocalContentColor.current) {
 fun CustomFieldItem(
     field: CustomField,
     i18n: I18nState,
+    modifier: Modifier = Modifier,
     onUpdate: (UpdateCustomFieldDefinitionDto) -> Unit,
     onDelete: () -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     
-    // Local state for editing without immediate sync
+    
     var localName by remember(field.name) { mutableStateOf(field.name) }
     var localType by remember(field.type) { mutableStateOf(field.type) }
     var localPrivacy by remember(field.privacy) { mutableStateOf(field.privacy) }
@@ -437,7 +526,7 @@ fun CustomFieldItem(
     val focusManager = LocalFocusManager.current
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         onClick = { isExpanded = !isExpanded }
@@ -501,7 +590,7 @@ fun CustomFieldItem(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Type Selector
+                    
                     var showTypeMenu by remember { mutableStateOf(false) }
                     Box(modifier = Modifier.weight(1f)) {
                         OutlinedButton(
@@ -527,7 +616,7 @@ fun CustomFieldItem(
                         }
                     }
 
-                    // Privacy Selector
+                    
                     var showPrivacyMenu by remember { mutableStateOf(false) }
                     Box(modifier = Modifier.weight(1f)) {
                         OutlinedButton(
@@ -568,7 +657,7 @@ fun CustomFieldItem(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Order
+                
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Text(i18n.text(MessageKey.CustomFieldOrderLabel), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     FilledIconButton(

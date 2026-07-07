@@ -55,12 +55,13 @@ fun HomeScreen(
         
         if (isSystem) {
             items.add(DashboardItem(Route.MembersManage.titleKey, Route.MembersManage.icon, Route.MembersManage))
+            items.add(DashboardItem(Route.Chat.titleKey, Route.Chat.icon, Route.Chat))
             items.add(DashboardItem(Route.Profile.titleKey, Route.Profile.icon, Route.Profile))
             items.add(DashboardItem(Route.Friends.titleKey, Route.Friends.icon, Route.Friends))
             items.add(DashboardItem(Route.System.titleKey, Route.System.icon, Route.System))
-            items.add(DashboardItem(MessageKey.SystemCustomFieldsTitle, Icons.AutoMirrored.Filled.List, Route.System))
         } else {
             items.add(DashboardItem(Route.SetupSystem.titleKey, Route.SetupSystem.icon, Route.SetupSystem))
+            items.add(DashboardItem(Route.Chat.titleKey, Route.Chat.icon, Route.Chat))
             items.add(DashboardItem(Route.Profile.titleKey, Route.Profile.icon, Route.Profile))
             items.add(DashboardItem(Route.Friends.titleKey, Route.Friends.icon, Route.Friends))
         }

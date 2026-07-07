@@ -66,6 +66,7 @@ fun MembersManageScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedMemberIds by remember { mutableStateOf(setOf<String>()) }
     var showBulkDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteGroupConfirm by remember { mutableStateOf(false) }
     
     val isSelectionMode = selectedMemberIds.isNotEmpty()
     
@@ -282,11 +283,7 @@ fun MembersManageScreen(
                                 Icon(Icons.Default.Edit, contentDescription = i18n.text(MessageKey.CommonEdit))
                             }
                              IconButton(onClick = {
-                                 scope.launch {
-                                     systemService.deleteGroup(currentGroupId!!)
-                                     val parent = (cachedGroups ?: emptyList()).find { it.id == currentGroupId }?.parentId
-                                     currentGroupId = parent
-                                 }
+                                 showDeleteGroupConfirm = true
                              }) {
                                  Icon(Icons.Default.Delete, contentDescription = i18n.text(MessageKey.CommonDelete))
                              }
@@ -716,7 +713,10 @@ fun MembersManageScreen(
     if (showBulkDeleteConfirm) {
         var deleteTapCount by remember { mutableIntStateOf(0) }
         AlertDialog(
-            onDismissRequest = { showBulkDeleteConfirm = false },
+            onDismissRequest = { 
+                showBulkDeleteConfirm = false 
+                deleteTapCount = 0
+            },
             title = { Text(i18n.text(MessageKey.DeleteMemberConfirmTitle)) },
             text = {
                 Column {
@@ -740,6 +740,7 @@ fun MembersManageScreen(
                                 }
                                 selectedMemberIds = emptySet()
                                 showBulkDeleteConfirm = false
+                                deleteTapCount = 0
                             }
                         }
                     },
@@ -751,7 +752,62 @@ fun MembersManageScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showBulkDeleteConfirm = false }) {
+                TextButton(onClick = { 
+                    showBulkDeleteConfirm = false 
+                    deleteTapCount = 0
+                }) {
+                    Text(i18n.text(MessageKey.CommonCancel))
+                }
+            }
+        )
+    }
+
+    if (showDeleteGroupConfirm && currentGroupId != null) {
+        var deleteTapCount by remember { mutableIntStateOf(0) }
+        AlertDialog(
+            onDismissRequest = { 
+                showDeleteGroupConfirm = false 
+                deleteTapCount = 0
+            },
+            title = { Text(i18n.text(MessageKey.DeleteFolderConfirmTitle)) },
+            text = {
+                Column {
+                    Text(i18n.text(MessageKey.DeleteFolderConfirmText))
+                    if (deleteTapCount > 0) {
+                        LinearProgressIndicator(
+                            progress = { deleteTapCount / 3f },
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deleteTapCount++
+                        if (deleteTapCount >= 3) {
+                            scope.launch {
+                                val idToDelete = currentGroupId!!
+                                val parent = (cachedGroups ?: emptyList()).find { it.id == idToDelete }?.parentId
+                                systemService.deleteGroup(idToDelete)
+                                currentGroupId = parent
+                                showDeleteGroupConfirm = false
+                                deleteTapCount = 0
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (deleteTapCount >= 2) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(if (deleteTapCount >= 2) i18n.text(MessageKey.CommonDelete) else "${3 - deleteTapCount}...")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showDeleteGroupConfirm = false 
+                    deleteTapCount = 0
+                }) {
                     Text(i18n.text(MessageKey.CommonCancel))
                 }
             }

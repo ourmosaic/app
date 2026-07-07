@@ -259,6 +259,11 @@ object SseTopics {
     const val READY = "ready"
     const val BLOCKS = "blocks"
     const val REPORTS = "reports"
+    const val CHAT_MESSAGE = "chat:message"
+    const val CHAT_MESSAGE_DELETED = "chat:message-deleted"
+    const val CHAT_CHANNEL = "chat:channel"
+    const val CHAT_CHANNEL_CREATED = "chat:channel-created"
+    const val CHAT_TYPING = "chat:typing"
 }
 
 @Serializable

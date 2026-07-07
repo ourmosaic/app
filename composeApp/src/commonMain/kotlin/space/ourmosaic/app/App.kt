@@ -38,6 +38,7 @@ fun App(initialTargetRoute: String? = null) {
     val authService = remember { AuthService() }
     val offlineManager = remember { OfflineManager() }
     val systemService = remember { SystemService(authService, offlineManager) }
+    val chatService = remember { ChatService(authService) }
     val syncWorker = remember { SyncWorker(systemService, offlineManager, authService) }
     val sseService = remember { SseService(authService) }
 
@@ -136,6 +137,7 @@ fun App(initialTargetRoute: String? = null) {
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onLogout = { navState.navigateTo(Route.Login) },
                         systemService = systemService,
+                        chatService = chatService,
                         sseService = sseService,
                         offlineManager = offlineManager,
                         authService = authService,
