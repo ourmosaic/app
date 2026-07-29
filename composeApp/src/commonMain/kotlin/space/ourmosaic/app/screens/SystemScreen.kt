@@ -27,7 +27,9 @@ import androidx.compose.ui.unit.dp
 import io.kamel.image.KamelImage
 import io.kamel.image.asyncPainterResource
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.style.TextAlign
 import space.ourmosaic.app.auth.AuthService
+import space.ourmosaic.app.system.CreateSystemOrSubSystemDto
 import space.ourmosaic.app.system.CustomField
 import space.ourmosaic.app.system.FieldType
 import space.ourmosaic.app.system.PrivacyLevel
@@ -55,29 +57,45 @@ import space.ourmosaic.app.components.rememberReorderableState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SystemScreen(
+    systemId: String? = null,
     i18n: I18nState,
     onOpenDrawer: () -> Unit,
     onBack: () -> Unit,
-    onManageMembers: () -> Unit,
-    offlineManager: OfflineManager
+    onManageMembers: (String?) -> Unit,
+    onNavigateToSubSystem: (String) -> Unit,
+    onNavigateToChat: (String?) -> Unit,
+    offlineManager: OfflineManager,
+    authService: AuthService,
+    systemService: SystemService
 ) {
-    val authService = remember { AuthService() }
-    val systemService = remember { SystemService(authService, offlineManager) }
     val scope = rememberCoroutineScope()
     
-    val systemResponse by offlineManager.cachedUserMe.collectAsState(null)
-    val system = systemResponse?.system
+    val userMe by offlineManager.cachedUserMe.collectAsState(null)
+    val systems by offlineManager.cachedSystems.collectAsState(emptyList())
     
-    var isLoading by remember { mutableStateOf(true) }
+    val system = remember(systemId, userMe, systems) {
+        if (systemId == null) {
+            userMe?.system ?: systems.find { it.parentSystemId == null }
+        } else {
+            systems.find { it.id == systemId }
+        }
+    }
+
+    val subSystems = remember(system, systems) {
+        if (system == null) emptyList()
+        else systems.filter { it.parentSystemId == system.id }
+    }
+    
+    var isLoading by remember { mutableStateOf(userMe?.system == null && systemId == null) }
     var isEditing by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     
     val pendingCount by offlineManager.pendingActionsCount.collectAsState()
     
-    
     var customName by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var colorHex by remember { mutableStateOf("") }
+    var frontPrivacy by remember { mutableStateOf(PrivacyLevel.PRIVATE) }
     var avatarUpdateTicket by remember { mutableStateOf(0) }
     
     val customFields by offlineManager.cachedCustomFields.collectAsState(emptyList())
@@ -93,7 +111,7 @@ fun SystemScreen(
             scope.launch {
                 localFields.forEachIndexed { index, field ->
                     if (field.order != index) {
-                        systemService.updateCustomField(field.id, UpdateCustomFieldDefinitionDto(order = index))
+                        systemService.updateCustomField(field.id, UpdateCustomFieldDefinitionDto(order = index), systemId = systemId)
                     }
                 }
             }
@@ -132,23 +150,24 @@ fun SystemScreen(
         }
     )
 
-    LaunchedEffect(systemResponse) {
-        if (systemResponse != null) {
+    LaunchedEffect(system) {
+        if (system != null) {
             if (!isEditing) {
-                customName = systemResponse?.system?.customName ?: ""
-                description = systemResponse?.system?.description ?: ""
-                colorHex = systemResponse?.system?.color ?: ""
+                customName = system.customName ?: ""
+                description = system.description ?: ""
+                colorHex = system.color ?: ""
+                frontPrivacy = system.frontPrivacy ?: PrivacyLevel.PRIVATE
             }
-            isLoading = false
         }
     }
 
     LaunchedEffect(Unit) {
-        authService.getUserMe().onSuccess { userResponse ->
+        val result = authService.getUserMe()
+        result.onSuccess { userResponse ->
             offlineManager.cacheUserMe(userResponse)
         }
-        
-        systemService.getCustomFields()
+        isLoading = false
+        systemService.getCustomFields(systemId = systemId)
     }
 
     Scaffold(
@@ -186,9 +205,10 @@ fun SystemScreen(
                                         val dto = UpdateSystemDto(
                                             customName = customName.ifBlank { null },
                                             description = description.ifBlank { null },
-                                            color = colorHex.ifBlank { null }
+                                            color = colorHex.ifBlank { null },
+                                            frontPrivacy = frontPrivacy
                                         )
-                                        systemService.updateSystem(dto)
+                                        systemService.updateSystem(dto, systemId = systemId)
                                         isEditing = false
                                         isSaving = false
                                     }
@@ -212,6 +232,26 @@ fun SystemScreen(
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        } else if (system == null) {
+            Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(i18n.text(MessageKey.SetupSystemDescription), textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { 
+                        scope.launch {
+                            isLoading = true
+                            authService.createSystem().onSuccess {
+                                authService.getUserMe().onSuccess { userResponse ->
+                                    offlineManager.cacheUserMe(userResponse)
+                                }
+                            }
+                            isLoading = false
+                        }
+                    }) {
+                        Text(i18n.text(MessageKey.SetupCreateNew))
+                    }
+                }
             }
         } else {
             Column(
@@ -265,7 +305,7 @@ fun SystemScreen(
                                 isSaving = true
                                 try {
                                     val croppedBytes = cropImage(bytes, x, y, size)
-                                    val result = systemService.uploadSystemAvatar(croppedBytes)
+                                    val result = systemService.uploadSystemAvatar(croppedBytes, systemId = systemId)
                                     result.onSuccess {
                                         avatarUpdateTicket++
                                     }
@@ -295,6 +335,68 @@ fun SystemScreen(
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 3
                     )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    var showPrivacyMenu by remember { mutableStateOf(false) }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(i18n.text(MessageKey.SystemFrontPrivacyLabel), style = MaterialTheme.typography.labelLarge)
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { showPrivacyMenu = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(16.dp)
+                            ) {
+                                val icon = when (frontPrivacy) {
+                                    PrivacyLevel.PUBLIC -> Icons.Default.Public
+                                    PrivacyLevel.FRIENDS -> Icons.Default.Group
+                                    PrivacyLevel.PRIVATE -> Icons.Default.Lock
+                                }
+                                Icon(icon, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = when (frontPrivacy) {
+                                        PrivacyLevel.PUBLIC -> i18n.text(MessageKey.PrivacyPublic)
+                                        PrivacyLevel.FRIENDS -> i18n.text(MessageKey.PrivacyFriends)
+                                        PrivacyLevel.PRIVATE -> i18n.text(MessageKey.PrivacyPrivate)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
+                            DropdownMenu(
+                                expanded = showPrivacyMenu,
+                                onDismissRequest = { showPrivacyMenu = false },
+                                modifier = Modifier.fillMaxWidth(0.9f)
+                            ) {
+                                PrivacyLevel.entries.forEach { level ->
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            val icon = when (level) {
+                                                PrivacyLevel.PUBLIC -> Icons.Default.Public
+                                                PrivacyLevel.FRIENDS -> Icons.Default.Group
+                                                PrivacyLevel.PRIVATE -> Icons.Default.Lock
+                                            }
+                                            Icon(icon, null, modifier = Modifier.size(18.dp))
+                                        },
+                                        text = {
+                                            Text(
+                                                when (level) {
+                                                    PrivacyLevel.PUBLIC -> i18n.text(MessageKey.PrivacyPublic)
+                                                    PrivacyLevel.FRIENDS -> i18n.text(MessageKey.PrivacyFriends)
+                                                    PrivacyLevel.PRIVATE -> i18n.text(MessageKey.PrivacyPrivate)
+                                                }
+                                            )
+                                        },
+                                        onClick = {
+                                            frontPrivacy = level
+                                            showPrivacyMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -346,13 +448,120 @@ fun SystemScreen(
                     }
                     
                     Button(
-                        onClick = onManageMembers,
+                        onClick = { onManageMembers(system?.id) },
                         modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(16.dp)
+                        contentPadding = PaddingValues(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
                     ) {
                         Icon(Icons.Default.Person, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(i18n.text(MessageKey.MembersManageTitle))
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Button(
+                        onClick = { onNavigateToChat(system?.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(i18n.text(MessageKey.ChatTitle))
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    var showCreateSubSystemDialog by remember { mutableStateOf(false) }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = i18n.text(MessageKey.SystemSubSystemsTitle),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = {
+                            showCreateSubSystemDialog = true
+                        }) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                        }
+                    }
+
+                    if (showCreateSubSystemDialog) {
+                        var subSystemName by remember { mutableStateOf("") }
+                        AlertDialog(
+                            onDismissRequest = { showCreateSubSystemDialog = false },
+                            title = { Text(i18n.text(MessageKey.SystemCreateSubSystemTitle)) },
+                            text = {
+                                OutlinedTextField(
+                                    value = subSystemName,
+                                    onValueChange = { subSystemName = it },
+                                    label = { Text(i18n.text(MessageKey.SystemCreateSubSystemPlaceholder)) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        val rootSystem = systems.find { it.parentSystemId == null } ?: userMe?.system
+                                        val parentId = rootSystem?.id ?: system?.parentSystemId ?: system?.id
+
+                                        if (parentId != null) {
+                                            scope.launch {
+                                                systemService.createSubSystem(CreateSystemOrSubSystemDto(
+                                                    customName = subSystemName,
+                                                    parent = parentId
+                                                )).onSuccess {
+                                                    systemService.getSystems()
+                                                }
+                                                showCreateSubSystemDialog = false
+                                            }
+                                        }
+                                    },
+                                    enabled = subSystemName.isNotBlank()
+                                ) {
+                                    Text(i18n.text(MessageKey.CommonCreate))
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showCreateSubSystemDialog = false }) {
+                                    Text(i18n.text(MessageKey.CommonCancel))
+                                }
+                            }
+                        )
+                    }
+
+                    if (subSystems.isEmpty()) {
+                        Text(
+                            i18n.text(MessageKey.SystemSubSystemsEmpty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        subSystems.forEach { sub ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable { onNavigateToSubSystem(sub.id) }.padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val color = if (!sub.color.isNullOrBlank()) ColorUtils.parseHexColor(sub.color) else MaterialTheme.colorScheme.primary
+                                    Box(Modifier.size(12.dp).background(color, CircleShape))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(sub.customName ?: i18n.text(MessageKey.ProfileSystemName))
+                                }
+                            }
+                        }
                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -369,7 +578,7 @@ fun SystemScreen(
                         )
                         IconButton(onClick = {
                             scope.launch {
-                                systemService.createCustomField()
+                                systemService.createCustomField(systemId = systemId)
                             }
                         }) {
                             Icon(Icons.Default.Add, contentDescription = i18n.text(MessageKey.CustomFieldAdd))
@@ -396,7 +605,7 @@ fun SystemScreen(
                                         modifier = with(reorderableState) { Modifier.reorderableItem(index, field.id) },
                                         onUpdate = { dto ->
                                             scope.launch {
-                                                systemService.updateCustomField(field.id, dto)
+                                                systemService.updateCustomField(field.id, dto, systemId = systemId)
                                             }
                                         },
                                         onDelete = {
@@ -434,7 +643,7 @@ fun SystemScreen(
                                                 val id = fieldToDelete?.id
                                                 if (id != null) {
                                                     scope.launch {
-                                                        systemService.deleteCustomField(id)
+                                                        systemService.deleteCustomField(id, systemId = systemId)
                                                     }
                                                 }
                                                 fieldToDelete = null

@@ -38,6 +38,7 @@ data class DashboardItem(
 @Composable
 fun HomeScreen(
     i18n: I18nState,
+    currentSystemId: String?,
     onOpenDrawer: () -> Unit,
     onNavigate: (Route) -> Unit,
     systemService: SystemService,
@@ -45,23 +46,30 @@ fun HomeScreen(
     authService: AuthService
 ) {
     val userMe by offlineManager.cachedUserMe.collectAsState(initial = null)
+    val systems by offlineManager.cachedSystems.collectAsState(initial = emptyList())
+
+    val currentSystem = remember(currentSystemId, userMe, systems) {
+        if (currentSystemId == null || currentSystemId == "@me") userMe?.system
+        else systems.find { it.id == currentSystemId } ?: userMe?.system
+    }
+
     val isSystem = userMe?.isSystem == true
     val pendingCount by offlineManager.pendingActionsCount.collectAsState()
     val isImporting by offlineManager.isImporting.collectAsState()
     val syncErrors by offlineManager.syncErrors.collectAsState()
 
-    val dashboardItems = remember(userMe, isSystem) {
+    val dashboardItems = remember(userMe, isSystem, currentSystemId) {
         val items = mutableListOf<DashboardItem>()
         
         if (isSystem) {
-            items.add(DashboardItem(Route.MembersManage.titleKey, Route.MembersManage.icon, Route.MembersManage))
-            items.add(DashboardItem(Route.Chat.titleKey, Route.Chat.icon, Route.Chat))
+            items.add(DashboardItem(Route.MembersManage().titleKey, Route.MembersManage().icon, Route.MembersManage(currentSystemId)))
+            items.add(DashboardItem(Route.Chat().titleKey, Route.Chat().icon, Route.Chat(currentSystemId)))
             items.add(DashboardItem(Route.Profile.titleKey, Route.Profile.icon, Route.Profile))
             items.add(DashboardItem(Route.Friends.titleKey, Route.Friends.icon, Route.Friends))
-            items.add(DashboardItem(Route.System.titleKey, Route.System.icon, Route.System))
+            items.add(DashboardItem(Route.System().titleKey, Route.System().icon, Route.System(currentSystemId)))
         } else {
             items.add(DashboardItem(Route.SetupSystem.titleKey, Route.SetupSystem.icon, Route.SetupSystem))
-            items.add(DashboardItem(Route.Chat.titleKey, Route.Chat.icon, Route.Chat))
+            items.add(DashboardItem(Route.Chat().titleKey, Route.Chat().icon, Route.Chat(currentSystemId)))
             items.add(DashboardItem(Route.Profile.titleKey, Route.Profile.icon, Route.Profile))
             items.add(DashboardItem(Route.Friends.titleKey, Route.Friends.icon, Route.Friends))
         }
@@ -121,14 +129,14 @@ fun HomeScreen(
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
                     MosaicAvatar(
-                        avatarUrl = userMe?.system?.avatarUrl,
+                        avatarUrl = currentSystem?.avatarUrl,
                         authService = authService,
                         size = 48.dp
                     )
                     Spacer(Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = userMe?.system?.customName ?: userMe?.username ?: "",
+                            text = currentSystem?.customName ?: currentSystem?.username ?: userMe?.username ?: "",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold
                         )

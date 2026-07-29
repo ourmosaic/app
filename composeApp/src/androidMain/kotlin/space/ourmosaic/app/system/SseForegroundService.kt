@@ -23,9 +23,11 @@ class SseForegroundService : Service() {
     private var sseService: SseService? = null
     private var systemService: SystemService? = null
 
+    private var currentSystemId: String? = null
+
     override fun onCreate() {
         super.onCreate()
-        val authService = AuthService()
+        val authService = AuthService.getInstance()
         val offlineManager = OfflineManager()
         sseService = SseService(authService)
         systemService = SystemService(authService, offlineManager)
@@ -36,8 +38,8 @@ class SseForegroundService : Service() {
                 Logger.d("SseForegroundService", "Received event in background: ${event.topic}")
                 when (event.topic) {
                     SseTopics.FRONT_SESSIONS, SseTopics.FEDERATION_FRONT_SESSIONS, SseTopics.FRONT_CHANGES -> {
-                        systemService?.getActiveFrontSessions()
-                        systemService?.getFriends()
+                        systemService?.getActiveFrontSessions(systemId = currentSystemId)
+                        systemService?.getFriends(systemId = currentSystemId)
                     }
                     SseTopics.FRIEND_FRONT_SESSIONS -> {
                         try {
@@ -67,19 +69,53 @@ class SseForegroundService : Service() {
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // We no longer call startForeground to avoid the persistent notification.
-        // This service will run as a background service.
-        sseService?.startStreaming(serviceScope)
+        val notification = createNotification()
+        val systemId = intent?.getStringExtra("system_id")
+        currentSystemId = systemId
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1002, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1002, notification)
+            }
+        } catch (e: Exception) {
+            Logger.e("SseForegroundService", "Error starting foreground service", e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        sseService?.startStreaming(serviceScope, systemId = systemId)
         return START_STICKY
     }
 
-    // Notification removed to avoid annoyance. 
-    // Service will run in background without being a "Foreground Service".
-    /*
     private fun createNotification(): Notification {
-        ...
+        val channelId = "front_status_channel"
+        
+        val notificationIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = if (notificationIntent != null) {
+            PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else null
+
+        return NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Mosaic Sync")
+            .setContentText("Maintaining real-time connection")
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .apply {
+                if (pendingIntent != null) {
+                    setContentIntent(pendingIntent)
+                }
+            }
+            .build()
     }
-    */
 
     override fun onDestroy() {
         super.onDestroy()

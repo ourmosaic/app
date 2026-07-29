@@ -103,9 +103,11 @@ actual fun showSimpleNotification(title: String, message: String, id: Int?) {
     notificationManager.notify(id ?: Random.nextInt(), notification)
 }
 
-actual fun startSseBackgroundService() {
+actual fun startSseBackgroundService(systemId: String?) {
     val context = appContext ?: return
-    val intent = Intent(context, SseForegroundService::class.java)
+    val intent = Intent(context, SseForegroundService::class.java).apply {
+        putExtra("system_id", systemId)
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(intent)
     } else {

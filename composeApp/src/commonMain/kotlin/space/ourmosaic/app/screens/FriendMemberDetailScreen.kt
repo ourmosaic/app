@@ -32,6 +32,7 @@ import kotlinx.datetime.toLocalDateTime
 fun FriendMemberDetailScreen(
     member: MemberResponse,
     i18n: I18nState,
+    currentSystemId: String? = null,
     onBack: () -> Unit,
     onEdit: (String) -> Unit,
     authService: AuthService,
@@ -234,7 +235,7 @@ fun FriendMemberDetailScreen(
             onDismiss = { showBlockDialog = false },
             onConfirm = { reason ->
                 scope.launch {
-                    systemService.blockEntity(BlockRequest(BlockType.MEMBER, member.id, reason))
+                    systemService.blockEntity(BlockRequest(BlockType.MEMBER, member.id, reason), currentSystemId)
                         .onSuccess {
                             launch { snackbarHostState.showSnackbar(i18n.text(MessageKey.BlockSuccess)) }
                             showBlockDialog = false

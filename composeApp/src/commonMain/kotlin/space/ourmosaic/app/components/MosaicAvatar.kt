@@ -19,6 +19,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.kamel.image.KamelImage
 import io.kamel.image.asyncPainterResource
+import io.ktor.client.request.header
+import io.ktor.http.CacheControl
+import io.ktor.http.HttpHeaders
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.utils.Logger
 
@@ -30,7 +33,7 @@ fun MosaicAvatar(
     cornerRadius: Dp = 12.dp,
     avatarUpdateTicket: Int = 0,
     contentScale: ContentScale = ContentScale.Crop,
-    authService: AuthService = remember { AuthService() }
+    authService: AuthService
 ) {
     val processedUrl = remember(avatarUrl) {
         if (avatarUrl.isNullOrBlank() || (avatarUrl.contains("undefined") && !avatarUrl.contains("undefined:undefined"))) {
@@ -70,12 +73,19 @@ fun MosaicAvatar(
                     if (avatarUpdateTicket > 0) "$processedUrl${separator}t=$avatarUpdateTicket" else processedUrl
                 }
                 KamelImage(
-                    resource = { asyncPainterResource(cacheKey) },
+                    resource = { 
+                        asyncPainterResource(cacheKey) {
+                            requestBuilder {
+                                header(HttpHeaders.CacheControl, "max-age=31536000") // 1 year
+                            }
+                        }
+                    },
                     contentDescription = null,
                     contentScale = contentScale,
                     modifier = Modifier.fillMaxSize(),
                     onFailure = { error ->
                         Logger.e("MosaicAvatar", "KamelImage Error: ${error.message}")
+                        // Fallback to cached version without ticket if it exists
                         Icon(
                             Icons.Default.Person,
                             null,

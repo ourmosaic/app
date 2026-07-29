@@ -33,6 +33,7 @@ import space.ourmosaic.app.system.requestNotificationPermission
 fun SettingsScreen(
     i18n: I18nState,
     appSettings: AppSettings,
+    currentSystemId: String?,
     onOpenDrawer: () -> Unit,
     onLogout: () -> Unit,
     offlineManager: space.ourmosaic.app.offline.OfflineManager,
@@ -161,10 +162,10 @@ fun SettingsScreen(
                     onClick = {
                         offlineManager.clearAllData()
                         scope.launch {
-                            systemService.getMembers()
-                            systemService.getFrontSessions()
-                            systemService.getGroups()
-                            systemService.getCustomFields()
+                            systemService.getMembers(currentSystemId)
+                            systemService.getFrontSessions(currentSystemId)
+                            systemService.getGroups(currentSystemId)
+                            systemService.getCustomFields(currentSystemId)
                             authService.getUserMe().getOrNull()?.let { offlineManager.cacheUserMe(it) }
                             snackbarHostState.showSnackbar(i18n.text(MessageKey.SettingsClearCacheSuccess))
                         }

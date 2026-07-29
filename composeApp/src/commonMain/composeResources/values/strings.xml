@@ -7,5 +7,13 @@
     <string name="settings_title">Settings</string>
 
     <string name="common_back">Back</string>
+
+    <string name="sub_systems_title">Sub-systems</string>
+    <string name="sub_systems_create">Create Sub-system</string>
+    <string name="sub_systems_select">Select System</string>
+    <string name="sub_systems_name_label">Sub-system Name</string>
+    <string name="sub_systems_description_label">Description</string>
+    <string name="sub_systems_save">Save Sub-system</string>
+    <string name="sub_systems_empty">No sub-systems found.</string>
 </resources>
 

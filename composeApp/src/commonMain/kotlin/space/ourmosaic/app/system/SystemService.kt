@@ -6,6 +6,7 @@ import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
@@ -39,6 +40,14 @@ class SystemService(
         install(ContentNegotiation) {
             json(json)
         }
+        install(Logging) {
+            logger = object : io.ktor.client.plugins.logging.Logger {
+                override fun log(message: String) {
+                    space.ourmosaic.app.utils.Logger.d("SystemServiceHTTP", message)
+                }
+            }
+            level = LogLevel.ALL
+        }
         install(HttpTimeout) {
             requestTimeoutMillis = 15000
             connectTimeoutMillis = 15000
@@ -55,19 +64,116 @@ class SystemService(
         }
     }
 
-    suspend fun getMembers(): Result<List<MemberResponse>> {
+    suspend fun getSystems(): Result<List<SystemResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members?withCustomFields=true"
-        
+        val url = "https://$federation/v2/system/@me"
+
         return try {
             val response = client.get(url) {
                 getHeaders(this)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getMembers()
+                if (authService.refreshToken().isSuccess) return getSystems()
             }
             if (response.status.isSuccess()) {
-                val members = response.body<List<MemberResponse>>()
+                val systems = response.body<List<SystemResponse>>()
+                offlineManager.cacheSystems(systems)
+                Result.success(systems)
+            } else {
+                val cached = offlineManager.getCachedSystems()
+                if (cached != null) Result.success(cached)
+                else Result.failure(Exception("Failed to fetch systems: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createSubSystem(dto: CreateSystemOrSubSystemDto, fromSync: Boolean = false): Result<SystemResponse> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val url = "https://$federation/v2/system/@me"
+
+        val actionId = if (!fromSync) generateId(PendingActionType.CREATE_SYSTEM) else null
+        if (actionId != null) {
+            offlineManager.queueAction(
+                PendingAction(
+                    id = actionId,
+                    type = PendingActionType.CREATE_SYSTEM,
+                    jsonPayload = json.encodeToString(CreateSystemOrSubSystemDto.serializer(), dto),
+                    timestamp = Clock.System.now().toEpochMilliseconds()
+                ),
+                trigger = false
+            )
+        }
+
+        return try {
+            val response = client.post(url) {
+                getHeaders(this)
+                contentType(ContentType.Application.Json)
+                setBody(dto)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return createSubSystem(dto, fromSync)
+            }
+            if (response.status.isSuccess()) {
+                val system = response.body<SystemResponse>()
+                if (actionId != null) {
+                    offlineManager.saveIdMapping(system.id, actionId)
+                    offlineManager.removeAction(actionId)
+                }
+                updateSystemsCache(system)
+                Result.success(system)
+            } else {
+                val errorBody = response.bodyAsText()
+                Logger.e("SystemService", "Failed to create sub-system: ${response.status}, body: $errorBody")
+                if (actionId != null) triggerSync()
+                Result.failure(Exception("Failed to create sub-system: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            if (actionId != null) {
+                triggerSync()
+                val dummy = SystemResponse(
+                    id = actionId,
+                    customName = dto.customName,
+                    description = dto.description,
+                    parentSystemId = dto.parent
+                )
+                updateSystemsCache(dummy)
+                Result.success(dummy)
+            } else Result.failure(e)
+        }
+    }
+
+    private fun updateSystemsCache(system: SystemResponse) {
+        val current = offlineManager.getCachedSystems()?.toMutableList() ?: mutableListOf()
+        val index = current.indexOfFirst { it.id == system.id }
+        if (index != -1) {
+            current[index] = system
+        } else {
+            current.add(system)
+        }
+        offlineManager.cacheSystems(current)
+    }
+
+    suspend fun getMembers(systemId: String? = null): Result<List<MemberResponse>> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members?withCustomFields=true"
+        
+        return try {
+            val response = client.get(url) {
+                getHeaders(this)
+            }
+            
+            val responseBody = response.bodyAsText()
+
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.isTokenExpiredError(response, responseBody)) {
+                    if (authService.refreshToken().isSuccess) return getMembers(systemId)
+                }
+            }
+            if (response.status.isSuccess()) {
+                val members = json.decodeFromString<List<MemberResponse>>(responseBody)
                 offlineManager.cacheMembers(members)
                 
                 // Also update custom field definitions cache if we got them in the response
@@ -105,9 +211,10 @@ class SystemService(
         }
     }
 
-    suspend fun updateSystem(dto: UpdateSystemDto, fromSync: Boolean = false): Result<SystemResponse> {
+    suspend fun updateSystem(dto: UpdateSystemDto, fromSync: Boolean = false, systemId: String? = null): Result<SystemResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_SYSTEM) else null
         if (actionId != null) {
@@ -115,6 +222,7 @@ class SystemService(
                 PendingAction(
                     id = actionId,
                     type = PendingActionType.UPDATE_SYSTEM,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateSystemDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -129,7 +237,7 @@ class SystemService(
                 setBody(dto)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return updateSystem(dto, fromSync)
+                if (authService.refreshToken().isSuccess) return updateSystem(dto, fromSync, systemId)
             }
             if (response.status.isSuccess()) {
                 val system = response.body<SystemResponse>()
@@ -150,7 +258,8 @@ class SystemService(
                     customName = dto.customName ?: currentSystem?.customName,
                     description = dto.description ?: currentSystem?.description,
                     color = dto.color ?: currentSystem?.color,
-                    userId = currentSystem?.userId ?: ""
+                    userId = currentSystem?.userId ?: "",
+                    frontPrivacy = dto.frontPrivacy ?: currentSystem?.frontPrivacy
                 )
                 updateCachedSystem(dummy)
                 Result.success(dummy)
@@ -158,9 +267,10 @@ class SystemService(
         }
     }
 
-    suspend fun createMember(dto: CreateMemberDto, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun createMember(dto: CreateMemberDto, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members?withCustomFields=true"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members?withCustomFields=true"
         
         val actionId = if (!fromSync) generateId(PendingActionType.CREATE_MEMBER) else null
         if (actionId != null) {
@@ -168,6 +278,7 @@ class SystemService(
                 PendingAction(
                     id = actionId,
                     type = PendingActionType.CREATE_MEMBER,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(CreateMemberDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -218,9 +329,10 @@ class SystemService(
         }
     }
 
-    suspend fun deleteMember(memberId: String, fromSync: Boolean = false): Result<Unit> {
+    suspend fun deleteMember(memberId: String, fromSync: Boolean = false, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId"
         
         val actionId = if (!fromSync) generateId(PendingActionType.DELETE_MEMBER) else null
         if (actionId != null) {
@@ -229,6 +341,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.DELETE_MEMBER,
                     memberId = memberId,
+                    systemId = systemId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -260,6 +373,81 @@ class SystemService(
         }
     }
 
+    suspend fun transferMember(memberId: String, dto: TransferMemberDto, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId/transfer"
+
+        // Si on vient déjà d'une synchro, on ne fait que l'appel réseau
+        if (fromSync) {
+            return try {
+                val response = client.post(url) {
+                    getHeaders(this)
+                    contentType(ContentType.Application.Json)
+                    setBody(dto)
+                }
+                if (response.status.isSuccess()) {
+                    val member = response.body<MemberResponse>()
+                    updateMemberCacheOptimistically(member)
+                    Result.success(member)
+                } else {
+                    Result.failure(Exception("Failed to transfer member: ${response.status}"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+        // Sinon, on suit la logique Offline-First :
+        // 1. On prépare l'action
+        val actionId = generateId(PendingActionType.TRANSFER_MEMBER)
+        val action = PendingAction(
+            id = actionId,
+            type = PendingActionType.TRANSFER_MEMBER,
+            memberId = memberId,
+            systemId = systemId,
+            jsonPayload = json.encodeToString(TransferMemberDto.serializer(), dto),
+            timestamp = Clock.System.now().toEpochMilliseconds()
+        )
+
+        // 2. Optimistic UI update
+        val current = offlineManager.getCachedMembers()?.find { it.id == memberId }
+        val dummy = current?.copy(systemId = dto.targetSystemId)
+
+        // 3. Tentative d'appel direct
+        return try {
+            val response = client.post(url) {
+                getHeaders(this)
+                contentType(ContentType.Application.Json)
+                setBody(dto)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return transferMember(memberId, dto, false, systemId)
+            }
+            if (response.status.isSuccess()) {
+                val member = response.body<MemberResponse>()
+                updateMemberCacheOptimistically(member)
+                Result.success(member)
+            } else {
+                // Échec serveur : on met en file d'attente pour plus tard
+                offlineManager.queueAction(action)
+                triggerSync()
+                if (dummy != null) {
+                    updateMemberCacheOptimistically(dummy)
+                    Result.success(dummy)
+                } else Result.failure(Exception("Failed to transfer member: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            // Échec réseau : on met en file d'attente
+            offlineManager.queueAction(action)
+            triggerSync()
+            if (dummy != null) {
+                updateMemberCacheOptimistically(dummy)
+                Result.success(dummy)
+            } else Result.failure(e)
+        }
+    }
+
     private fun removeMemberFromCache(memberId: String) {
         val current = offlineManager.getCachedMembers() ?: return
         offlineManager.cacheMembers(current.filter { it.id != memberId })
@@ -276,9 +464,10 @@ class SystemService(
         offlineManager.cacheMembers(members)
     }
 
-    suspend fun updateMember(memberId: String, dto: UpdateMemberDto, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun updateMember(memberId: String, dto: UpdateMemberDto, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId?withCustomFields=true"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId?withCustomFields=true"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_MEMBER) else null
         if (actionId != null) {
@@ -287,6 +476,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPDATE_MEMBER,
                     memberId = memberId,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateMemberDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -340,9 +530,10 @@ class SystemService(
         }
     }
 
-    suspend fun updateMemberField(memberId: String, fieldId: String, value: String, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun updateMemberField(memberId: String, fieldId: String, value: String, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId/fields/$fieldId?withCustomFields=true"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId/fields/$fieldId?withCustomFields=true"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_MEMBER_FIELD) else null
         if (actionId != null) {
@@ -352,6 +543,7 @@ class SystemService(
                     type = PendingActionType.UPDATE_MEMBER_FIELD,
                     memberId = memberId,
                     fieldId = fieldId,
+                    systemId = systemId,
                     jsonPayload = value,
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -411,9 +603,10 @@ class SystemService(
         }
     }
 
-    suspend fun uploadMemberAvatar(memberId: String, avatarBytes: ByteArray, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun uploadMemberAvatar(memberId: String, avatarBytes: ByteArray, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId/avatar"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId/avatar"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
         if (actionId != null) {
@@ -425,6 +618,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPLOAD_AVATAR,
                     memberId = memberId,
+                    systemId = systemId,
                     jsonPayload = fileName,
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -462,9 +656,10 @@ class SystemService(
         }
     }
 
-    suspend fun updateGroup(groupId: String, dto: CreateGroupDto, fromSync: Boolean = false): Result<MemberGroup> {
+    suspend fun updateGroup(groupId: String, dto: CreateGroupDto, fromSync: Boolean = false, systemId: String? = null): Result<MemberGroup> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups/$groupId"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups/$groupId"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_GROUP) else null
         if (actionId != null) {
@@ -473,6 +668,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPDATE_GROUP,
                     memberId = groupId,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -522,9 +718,10 @@ class SystemService(
         }
     }
 
-    suspend fun uploadSystemAvatar(avatarBytes: ByteArray, fromSync: Boolean = false): Result<SystemResponse> {
+    suspend fun uploadSystemAvatar(avatarBytes: ByteArray, fromSync: Boolean = false, systemId: String? = null): Result<SystemResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/avatar"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/avatar"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
         if (actionId != null) {
@@ -536,6 +733,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPLOAD_AVATAR,
                     memberId = "@me",
+                    systemId = systemId,
                     jsonPayload = fileName,
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -573,9 +771,10 @@ class SystemService(
         }
     }
 
-    suspend fun getCustomFields(): Result<List<CustomField>> {
+    suspend fun getCustomFields(systemId: String? = null): Result<List<CustomField>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/customFields"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/customFields"
         
         return try {
             val response = client.get(url) {
@@ -600,9 +799,10 @@ class SystemService(
         }
     }
 
-    suspend fun createCustomField(fromSync: Boolean = false): Result<CustomField> {
+    suspend fun createCustomField(fromSync: Boolean = false, systemId: String? = null): Result<CustomField> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/customFields"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/customFields"
         
         val actionId = if (!fromSync) generateId(PendingActionType.CREATE_CUSTOM_FIELD) else null
         if (actionId != null) {
@@ -610,6 +810,7 @@ class SystemService(
                 PendingAction(
                     id = actionId,
                     type = PendingActionType.CREATE_CUSTOM_FIELD,
+                    systemId = systemId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -653,9 +854,10 @@ class SystemService(
         }
     }
 
-    suspend fun updateCustomField(fieldId: String, dto: UpdateCustomFieldDefinitionDto, fromSync: Boolean = false): Result<CustomField> {
+    suspend fun updateCustomField(fieldId: String, dto: UpdateCustomFieldDefinitionDto, fromSync: Boolean = false, systemId: String? = null): Result<CustomField> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/customFields/$fieldId"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/customFields/$fieldId"
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_CUSTOM_FIELD) else null
         if (actionId != null) {
@@ -664,6 +866,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPDATE_CUSTOM_FIELD,
                     fieldId = fieldId,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateCustomFieldDefinitionDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -717,9 +920,10 @@ class SystemService(
         }
     }
 
-    suspend fun deleteCustomField(fieldId: String, fromSync: Boolean = false): Result<Unit> {
+    suspend fun deleteCustomField(fieldId: String, fromSync: Boolean = false, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/customFields/$fieldId"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/customFields/$fieldId"
         
         val actionId = if (!fromSync) generateId(PendingActionType.DELETE_CUSTOM_FIELD) else null
         if (actionId != null) {
@@ -728,6 +932,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.DELETE_CUSTOM_FIELD,
                     fieldId = fieldId,
+                    systemId = systemId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -760,7 +965,7 @@ class SystemService(
         }
     }
 
-    suspend fun startFrontSession(memberId: String): Result<FrontSession> {
+    suspend fun startFrontSession(memberId: String, systemId: String? = null): Result<FrontSession> {
         val now = Clock.System.now()
         val timestamp = now.toEpochMilliseconds()
         val actionId = generateId(PendingActionType.START_FRONT)
@@ -768,7 +973,7 @@ class SystemService(
         val newSession = FrontSession(
             id = actionId,
             memberId = memberId,
-            systemId = settings.getStringOrNull("system_id") ?: "",
+            systemId = systemId ?: settings.getStringOrNull("system_id") ?: "",
             startTime = now.toString(),
             endTime = null
         )
@@ -781,7 +986,8 @@ class SystemService(
         if (federation != null) {
             val resolvedMemberId = offlineManager.getServerId(memberId)
             if (resolvedMemberId != null && !resolvedMemberId.contains("_")) {
-                val url = "https://$federation/v1/system/@me/members/$resolvedMemberId/front-session"
+                val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+                val url = "https://$federation/v1/$systemScope/members/$resolvedMemberId/front-session"
                 space.ourmosaic.app.utils.Logger.d("SystemService", "[SYNC_DEBUG] Direct start front attempt: $url")
                 try {
                     val response = client.post(url) {
@@ -819,6 +1025,7 @@ class SystemService(
             id = actionId,
             type = PendingActionType.START_FRONT,
             memberId = memberId,
+            systemId = systemId,
             jsonPayload = "{}",
             timestamp = timestamp
         )
@@ -829,7 +1036,7 @@ class SystemService(
         return Result.success(newSession)
     }
 
-    suspend fun endFrontSession(memberId: String, sessionId: String? = null): Result<FrontSession> {
+    suspend fun endFrontSession(memberId: String, sessionId: String? = null, systemId: String? = null): Result<FrontSession> {
         val now = Clock.System.now()
         val timestamp = now.toEpochMilliseconds()
         val actionId = generateId(PendingActionType.END_FRONT)
@@ -850,7 +1057,7 @@ class SystemService(
         val endedSession = FrontSession(
             id = cachedSession?.id ?: targetSessionId ?: actionId,
             memberId = memberId,
-            systemId = settings.getStringOrNull("system_id") ?: "",
+            systemId = systemId ?: settings.getStringOrNull("system_id") ?: "",
             startTime = cachedSession?.startTime ?: now.toString(),
             endTime = now.toString()
         )
@@ -865,10 +1072,11 @@ class SystemService(
             val resolvedSessionId = sessionId?.let { offlineManager.getServerId(it) }
 
             if (resolvedMemberId != null && !resolvedMemberId.contains("_")) {
+                val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
                 val url = if (resolvedSessionId != null && !resolvedSessionId.contains("_")) {
-                    "https://$federation/v1/system/@me/members/$resolvedMemberId/front-session/$resolvedSessionId/end"
+                    "https://$federation/v1/$systemScope/members/$resolvedMemberId/front-session/$resolvedSessionId/end"
                 } else {
-                    "https://$federation/v1/system/@me/members/$resolvedMemberId/front-session/end"
+                    "https://$federation/v1/$systemScope/members/$resolvedMemberId/front-session/end"
                 }
 
                 space.ourmosaic.app.utils.Logger.d("SystemService", "[SYNC_DEBUG] Direct end front attempt: $url")
@@ -913,6 +1121,7 @@ class SystemService(
             type = PendingActionType.END_FRONT,
             memberId = memberId,
             sessionId = targetSessionId,
+            systemId = systemId,
             jsonPayload = json.encodeToString(mapOf("startTime" to originalStartTime.toString())),
             timestamp = timestamp
         )
@@ -923,12 +1132,16 @@ class SystemService(
         return Result.success(endedSession)
     }
 
-    suspend fun syncFrontSessions(): Result<List<FrontSession>> {
+    suspend fun syncFrontSessions(systemId: String? = null): Result<List<FrontSession>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/front-session/sync"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/front-session/sync"
         
         val allActions = offlineManager.getPendingActions()
-        val frontActions = allActions.filter { it.type == PendingActionType.START_FRONT || it.type == PendingActionType.END_FRONT }
+        val frontActions = allActions.filter { 
+            (it.type == PendingActionType.START_FRONT || it.type == PendingActionType.END_FRONT) &&
+            it.systemId == systemId
+        }
         
         if (frontActions.isEmpty()) return Result.success(emptyList())
 
@@ -1036,10 +1249,11 @@ class SystemService(
         }
     }
 
-    suspend fun getFrontSessions(): Result<List<FrontSession>> {
+    suspend fun getFrontSessions(systemId: String? = null): Result<List<FrontSession>> {
         val federation =
             authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/front-sessions"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/front-sessions"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
@@ -1062,7 +1276,7 @@ class SystemService(
         }
     }
 
-    suspend fun getActiveFrontSessions(forceRefresh: Boolean = false): Result<List<FrontSession>> {
+    suspend fun getActiveFrontSessions(forceRefresh: Boolean = false, systemId: String? = null): Result<List<FrontSession>> {
         // En mode offline ou rafraîchissement normal, on se base sur le cache global (qui contient les merged sessions)
         val cached = offlineManager.getCachedFrontSessions()
         if (!forceRefresh && cached != null) {
@@ -1070,14 +1284,19 @@ class SystemService(
         }
         
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/front-sessions/active"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/front-sessions/active"
         return try {
             val response = client.get(url) { getHeaders(this) }
+            val responseBody = response.bodyAsText()
+
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getActiveFrontSessions(forceRefresh)
+                if (authService.isTokenExpiredError(response, responseBody)) {
+                    if (authService.refreshToken().isSuccess) return getActiveFrontSessions(forceRefresh, systemId)
+                }
             }
             if (response.status.isSuccess()) {
-                val sessions = response.body<List<FrontSession>>()
+                val sessions = json.decodeFromString<List<FrontSession>>(responseBody)
                 
                 // CRUCIAL: On ne remplace pas tout le cache par les sessions actives du serveur.
                 // On utilise cacheFrontSessions avec markOthersAsEnded = true pour invalider les sessions locales qui ne sont plus actives sur le serveur.
@@ -1097,9 +1316,10 @@ class SystemService(
         }
     }
 
-    suspend fun createGroup(dto: CreateGroupDto, fromSync: Boolean = false, parentId: String? = null): Result<MemberGroup> {
+    suspend fun createGroup(dto: CreateGroupDto, fromSync: Boolean = false, parentId: String? = null, systemId: String? = null): Result<MemberGroup> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups"
         val body = dto.copy(parentId = parentId ?: dto.parentId)
         
         val actionId = if (!fromSync) generateId(PendingActionType.CREATE_GROUP) else null
@@ -1108,6 +1328,7 @@ class SystemService(
                 PendingAction(
                     id = actionId,
                     type = PendingActionType.CREATE_GROUP,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), body),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -1165,9 +1386,10 @@ class SystemService(
         offlineManager.cacheGroups(current)
     }
 
-    suspend fun deleteGroup(groupId: String, fromSync: Boolean = false): Result<Unit> {
+    suspend fun deleteGroup(groupId: String, fromSync: Boolean = false, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups/$groupId"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups/$groupId"
         
         val actionId = if (!fromSync) generateId(PendingActionType.DELETE_GROUP) else null
         if (actionId != null) {
@@ -1176,6 +1398,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.DELETE_GROUP,
                     memberId = groupId,
+                    systemId = systemId,
                     jsonPayload = "{}",
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -1212,9 +1435,10 @@ class SystemService(
         offlineManager.cacheGroups(current.filter { it.id != groupId })
     }
 
-    suspend fun updateMemberGroups(memberId: String, groupIds: List<String>, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun updateMemberGroups(memberId: String, groupIds: List<String>, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId/groups"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId/groups"
         val dto = UpdateMemberGroupsDto(groupIds)
 
         val actionId = if (!fromSync) generateId(PendingActionType.UPDATE_MEMBER_GROUPS) else null
@@ -1224,6 +1448,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.UPDATE_MEMBER_GROUPS,
                     memberId = memberId,
+                    systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateMemberGroupsDto.serializer(), dto),
                     timestamp = Clock.System.now().toEpochMilliseconds()
                 ),
@@ -1274,9 +1499,10 @@ class SystemService(
         }
     }
 
-    suspend fun deleteMemberGroups(memberId: String, groupIds: List<String>, fromSync: Boolean = false): Result<MemberResponse> {
+    suspend fun deleteMemberGroups(memberId: String, groupIds: List<String>, fromSync: Boolean = false, systemId: String? = null): Result<MemberResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/members/$memberId/groups"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/members/$memberId/groups"
         val dto = UpdateMemberGroupsDto(groupIds)
         
         // Use UPDATE_MEMBER_GROUPS type but handle it as a deletion logic if needed, 
@@ -1306,9 +1532,10 @@ class SystemService(
         }
     }
 
-    suspend fun getGroups(): Result<List<MemberGroup>> {
+    suspend fun getGroups(systemId: String? = null): Result<List<MemberGroup>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
@@ -1330,9 +1557,10 @@ class SystemService(
         }
     }
 
-    suspend fun getChildGroups(groupId: String): Result<List<MemberGroup>> {
+    suspend fun getChildGroups(groupId: String, systemId: String? = null): Result<List<MemberGroup>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups/$groupId/children"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups/$groupId/children"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
@@ -1345,9 +1573,10 @@ class SystemService(
         }
     }
 
-    suspend fun getMembersInGroup(groupId: String): Result<List<MemberResponse>> {
+    suspend fun getMembersInGroup(groupId: String, systemId: String? = null): Result<List<MemberResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/system/@me/groups/$groupId/members?withCustomFields=true"
+        val systemScope = if (systemId != null) "system/$systemId" else "system/@me"
+        val url = "https://$federation/v1/$systemScope/groups/$groupId/members?withCustomFields=true"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
@@ -1384,9 +1613,10 @@ class SystemService(
         }
     }
 
-    suspend fun sendFriendRequest(dto: SendFriendRequestDto): Result<FriendRequestResponse> {
+    suspend fun sendFriendRequest(dto: SendFriendRequestDto, systemId: String? = null): Result<FriendRequestResponse> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/request"
+        var url = "https://$federation/v1/friendship/request"
+        if (systemId != null) url += "?system_id=$systemId"
         space.ourmosaic.app.utils.Logger.d("SystemService", "Sending friend request to $url with body: $dto")
         return try {
             val response = client.post(url) {
@@ -1395,12 +1625,12 @@ class SystemService(
                 setBody(dto)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return sendFriendRequest(dto)
+                if (authService.refreshToken().isSuccess) return sendFriendRequest(dto, systemId)
             }
             if (response.status.isSuccess()) {
                 val body = response.body<FriendRequestResponse>()
                 space.ourmosaic.app.utils.Logger.d("SystemService", "Friend request sent successfully: $body")
-                getSentFriendRequests() // Refresh the sent requests list
+                getSentFriendRequests(systemId) // Refresh the sent requests list
                 Result.success(body)
             } else {
                 val errorBody = response.bodyAsText()
@@ -1464,13 +1694,14 @@ class SystemService(
         }
     }
 
-    suspend fun getSentFriendRequests(): Result<List<FriendRequestResponse>> {
+    suspend fun getSentFriendRequests(systemId: String? = null): Result<List<FriendRequestResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/requests/sent"
+        var url = "https://$federation/v1/friendship/requests/sent"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getSentFriendRequests()
+                if (authService.refreshToken().isSuccess) return getSentFriendRequests(systemId)
             }
             if (response.status.isSuccess()) {
                 val requests = response.body<List<FriendRequestResponse>>()
@@ -1485,13 +1716,14 @@ class SystemService(
         }
     }
 
-    suspend fun getReceivedFriendRequests(): Result<List<FriendRequestResponse>> {
+    suspend fun getReceivedFriendRequests(systemId: String? = null): Result<List<FriendRequestResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/requests/received"
+        var url = "https://$federation/v1/friendship/requests/received"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getReceivedFriendRequests()
+                if (authService.refreshToken().isSuccess) return getReceivedFriendRequests(systemId)
             }
             if (response.status.isSuccess()) {
                 val requests = response.body<List<FriendRequestResponse>>()
@@ -1506,13 +1738,14 @@ class SystemService(
         }
     }
 
-    suspend fun getFriends(): Result<List<SystemResponse>> {
+    suspend fun getFriends(systemId: String? = null): Result<List<SystemResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/list"
+        var url = "https://$federation/v1/friendship/list"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getFriends()
+                if (authService.refreshToken().isSuccess) return getFriends(systemId)
             }
             if (response.status.isSuccess()) {
                 val friends = response.body<List<SystemResponse>>()
@@ -1527,13 +1760,32 @@ class SystemService(
         }
     }
 
-    suspend fun getFriendSystem(friendId: String): Result<FriendSystemView> {
+    suspend fun getUserActiveFrontSessions(userId: String): Result<List<FriendFrontSessionResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/$friendId/system"
+        val url = "https://$federation/v2/users/$userId/front-sessions/active"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getFriendSystem(friendId)
+                if (authService.refreshToken().isSuccess) return getUserActiveFrontSessions(userId)
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                Result.failure(Exception("Failed to get user active front sessions: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getFriendSystem(friendId: String, systemId: String? = null): Result<FriendSystemView> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        var url = "https://$federation/v2/friendship/$friendId/system"
+        if (systemId != null) url += "?system_id=$systemId"
+        return try {
+            val response = client.get(url) { getHeaders(this) }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return getFriendSystem(friendId, systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(response.body())
@@ -1545,13 +1797,32 @@ class SystemService(
         }
     }
 
-    suspend fun getFriendMembers(friendId: String): Result<List<MemberResponse>> {
+    suspend fun getFriendFrontSessions(friendId: String): Result<List<FriendFrontSessionResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/$friendId/members"
+        val url = "https://$federation/v2/friendship/$friendId/front-sessions"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getFriendMembers(friendId)
+                if (authService.refreshToken().isSuccess) return getFriendFrontSessions(friendId)
+            }
+            if (response.status.isSuccess()) {
+                Result.success(response.body())
+            } else {
+                Result.failure(Exception("Failed to get friend front sessions: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getFriendMembers(friendId: String, systemId: String? = null): Result<List<MemberResponse>> {
+        val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
+        var url = "https://$federation/v1/friendship/$friendId/members"
+        if (systemId != null) url += "?system_id=$systemId"
+        return try {
+            val response = client.get(url) { getHeaders(this) }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                if (authService.refreshToken().isSuccess) return getFriendMembers(friendId, systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(response.body())
@@ -1587,13 +1858,14 @@ class SystemService(
     }
 
 
-    suspend fun removeFriend(friendId: String): Result<Unit> {
+    suspend fun removeFriend(friendId: String, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/v1/friendship/$friendId"
+        var url = "https://$federation/v1/friendship/$friendId"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.delete(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return removeFriend(friendId)
+                if (authService.refreshToken().isSuccess) return removeFriend(friendId, systemId)
             }
             if (response.status.isSuccess()) {
                 // Update cache
@@ -1631,9 +1903,10 @@ class SystemService(
         }
     }
 
-    suspend fun blockEntity(dto: BlockRequest): Result<Unit> {
+    suspend fun blockEntity(dto: BlockRequest, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/safety/block"
+        var url = "https://$federation/safety/block"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.post(url) {
                 getHeaders(this)
@@ -1641,7 +1914,7 @@ class SystemService(
                 setBody(dto)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return blockEntity(dto)
+                if (authService.refreshToken().isSuccess) return blockEntity(dto, systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(Unit)
@@ -1654,9 +1927,10 @@ class SystemService(
         }
     }
 
-    suspend fun unblockEntity(dto: UnblockRequest): Result<Unit> {
+    suspend fun unblockEntity(dto: UnblockRequest, systemId: String? = null): Result<Unit> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/safety/unblock"
+        var url = "https://$federation/safety/unblock"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.delete(url) {
                 getHeaders(this)
@@ -1664,7 +1938,7 @@ class SystemService(
                 setBody(dto)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return unblockEntity(dto)
+                if (authService.refreshToken().isSuccess) return unblockEntity(dto, systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(Unit)
@@ -1677,13 +1951,14 @@ class SystemService(
         }
     }
 
-    suspend fun getBlockedUsers(): Result<List<BlockedUserResponse>> {
+    suspend fun getBlockedUsers(systemId: String? = null): Result<List<BlockedUserResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/safety/blocked/users"
+        var url = "https://$federation/safety/blocked/users"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getBlockedUsers()
+                if (authService.refreshToken().isSuccess) return getBlockedUsers(systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(response.body())
@@ -1695,13 +1970,14 @@ class SystemService(
         }
     }
 
-    suspend fun getBlockedMembers(): Result<List<BlockedMemberResponse>> {
+    suspend fun getBlockedMembers(systemId: String? = null): Result<List<BlockedMemberResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/safety/blocked/members"
+        var url = "https://$federation/safety/blocked/members"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getBlockedMembers()
+                if (authService.refreshToken().isSuccess) return getBlockedMembers(systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(response.body())
@@ -1713,13 +1989,14 @@ class SystemService(
         }
     }
 
-    suspend fun getBlockedSystems(): Result<List<BlockedSystemResponse>> {
+    suspend fun getBlockedSystems(systemId: String? = null): Result<List<BlockedSystemResponse>> {
         val federation = authService.getFederation() ?: return Result.failure(Exception("No federation"))
-        val url = "https://$federation/safety/blocked/systems"
+        var url = "https://$federation/safety/blocked/systems"
+        if (systemId != null) url += "?system_id=$systemId"
         return try {
             val response = client.get(url) { getHeaders(this) }
             if (response.status == HttpStatusCode.Unauthorized) {
-                if (authService.refreshToken().isSuccess) return getBlockedSystems()
+                if (authService.refreshToken().isSuccess) return getBlockedSystems(systemId)
             }
             if (response.status.isSuccess()) {
                 Result.success(response.body())
@@ -1734,10 +2011,15 @@ class SystemService(
     private fun updateCachedSystem(system: SystemResponse) {
         val currentUser = authService.userMe.value
         if (currentUser != null) {
-            val updatedUser = currentUser.copy(system = system)
-            authService.updateUserMe(updatedUser)
-            offlineManager.cacheUserMe(updatedUser)
+            if (system.id == currentUser.system?.id) {
+                val updatedUser = currentUser.copy(system = system)
+                authService.updateUserMe(updatedUser)
+                offlineManager.cacheUserMe(updatedUser)
+            }
         }
+        
+        // Also update the list of all systems (root + sub-systems)
+        updateSystemsCache(system)
     }
 
     fun triggerSync() {

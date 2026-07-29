@@ -31,7 +31,10 @@ data class ChatMessageResponse(
     val timestamp: String? = null,
     val sender: MemberResponse? = null,
     val isPending: Boolean = false,
-    val isFailed: Boolean = false
+    val isFailed: Boolean = false,
+    val isEdited: Boolean = false,
+    val isPendingEdit: Boolean = false,
+    val isEditFailed: Boolean = false
 )
 
 @Serializable

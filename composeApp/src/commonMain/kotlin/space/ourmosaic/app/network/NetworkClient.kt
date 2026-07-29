@@ -2,6 +2,7 @@ package space.ourmosaic.app.network
 
 import io.ktor.client.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.logging.*
 import io.ktor.client.plugins.sse.*
 import io.ktor.client.request.*
 import io.ktor.http.*
@@ -19,6 +20,14 @@ class NetworkClient(private val authService: AuthService) {
     val client = HttpClient {
         install(ContentNegotiation) {
             json(json)
+        }
+        install(Logging) {
+            logger = object : io.ktor.client.plugins.logging.Logger {
+                override fun log(message: String) {
+                    space.ourmosaic.app.utils.Logger.d("HTTP", message)
+                }
+            }
+            level = LogLevel.ALL
         }
         install(SSE)
     }

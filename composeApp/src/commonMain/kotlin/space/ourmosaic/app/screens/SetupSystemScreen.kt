@@ -12,17 +12,23 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.decodeFromJsonElement
+import space.ourmosaic.app.FilePickerResult
+import space.ourmosaic.app.rememberFilePickerLauncher
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
 import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.system.*
 
+private enum class ImportSource { SIMPLY_PLURAL, AMPERSAND }
+private enum class ImportMethod { API, JSON }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupSystemScreen(
     i18n: I18nState,
-    onSetupComplete: () -> Unit,
+    currentSystemId: String?,
+    onSetupComplete: (String?) -> Unit,
     onSkip: () -> Unit,
     systemService: SystemService,
     sseService: SseService,
@@ -31,11 +37,26 @@ fun SetupSystemScreen(
 ) {
     val scope = rememberCoroutineScope()
     
+    val userMe by authService.userMe.collectAsState()
+    val hasSystem = userMe?.isSystem == true
+    
     var isLoading by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showImportDialog by remember { mutableStateOf(false) }
+    
+    // États pour le dialogue d'import
+    var importSource by remember { mutableStateOf<ImportSource?>(null) }
+    var importMethod by remember { mutableStateOf(ImportMethod.API) }
     var apiKey by remember { mutableStateOf("") }
+    var jsonText by remember { mutableStateOf("") }
+    var selectedFile by remember { mutableStateOf<FilePickerResult?>(null) }
+
+    val filePickerLauncher = rememberFilePickerLauncher { result ->
+        if (result != null) {
+            selectedFile = result
+            jsonText = result.content.decodeToString()
+        }
+    }
 
     LaunchedEffect(isImporting) {
         if (isImporting) {
@@ -47,7 +68,7 @@ fun SetupSystemScreen(
                             ImportEvents.COMPLETED -> {
                                 isImporting = false
                                 offlineManager.setImporting(false)
-                                onSetupComplete()
+                                onSetupComplete(payload.systemId)
                             }
                             ImportEvents.FAILED -> {
                                 isImporting = false
@@ -66,7 +87,12 @@ fun SetupSystemScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(i18n.text(MessageKey.SetupSystemTitle)) }
+                title = { 
+                    Text(
+                        if (hasSystem) i18n.text(MessageKey.SetupSubSystemTitle) 
+                        else i18n.text(MessageKey.SetupSystemTitle)
+                    ) 
+                }
             )
         }
     ) { padding ->
@@ -79,20 +105,23 @@ fun SetupSystemScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = i18n.text(MessageKey.SetupSystemDescription),
+                text = if (hasSystem) i18n.text(MessageKey.SetupSubSystemDescription)
+                       else i18n.text(MessageKey.SetupSystemDescription),
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            if (!hasSystem) {
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = i18n.text(MessageKey.SetupImportantNote),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
+                Text(
+                    text = i18n.text(MessageKey.SetupImportantNote),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
@@ -110,10 +139,26 @@ fun SetupSystemScreen(
                     scope.launch {
                         isLoading = true
                         errorMessage = null
-                        val result = authService.createSystem()
+                        
+                        val result = if (hasSystem) {
+                            val parentId = userMe?.systems?.find { it.parentSystemId == null }?.id
+                                ?: userMe?.system?.parentSystemId
+                                ?: userMe?.system?.id
+
+                            if (parentId == null) {
+                                Result.failure(Exception("Root system not found"))
+                            } else {
+                                systemService.createSubSystem(CreateSystemOrSubSystemDto(
+                                    parent = parentId
+                                )).map { it.id }
+                            }
+                        } else {
+                            authService.createSystem().map { authService.userMe.value?.system?.id ?: "" }
+                        }
+
                         isLoading = false
                         if (result.isSuccess) {
-                            onSetupComplete()
+                            onSetupComplete(result.getOrNull())
                         } else {
                             errorMessage = result.exceptionOrNull()?.message
                         }
@@ -124,19 +169,49 @@ fun SetupSystemScreen(
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(i18n.text(MessageKey.SetupCreateNew))
+                Text(
+                    if (hasSystem) i18n.text(MessageKey.SetupCreateSubSystem)
+                    else i18n.text(MessageKey.SetupCreateNew)
+                )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            if (!hasSystem) {
+                Spacer(modifier = Modifier.height(16.dp))
 
-            OutlinedButton(
-                onClick = { showImportDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
-            ) {
-                Icon(Icons.Default.CloudDownload, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(i18n.text(MessageKey.SetupImportSimplyPlural))
+                // Simply Plural
+                OutlinedButton(
+                    onClick = { 
+                        importSource = ImportSource.SIMPLY_PLURAL
+                        importMethod = ImportMethod.API
+                        apiKey = ""
+                        jsonText = ""
+                        importSource = ImportSource.SIMPLY_PLURAL
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading
+                ) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(i18n.text(MessageKey.SetupImportSimplyPlural))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Ampersand
+                OutlinedButton(
+                    onClick = { 
+                        importSource = ImportSource.AMPERSAND
+                        importMethod = ImportMethod.JSON
+                        jsonText = ""
+                        importSource = ImportSource.AMPERSAND
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading
+                ) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(i18n.text(MessageKey.SetupImportAmpersand))
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -145,7 +220,7 @@ fun SetupSystemScreen(
                 onClick = onSkip,
                 enabled = !isLoading
             ) {
-                Text(i18n.text(MessageKey.CommonBack)) // Using Back/Cancel for skip
+                Text(i18n.text(MessageKey.CommonBack))
             }
         }
 
@@ -159,7 +234,7 @@ fun SetupSystemScreen(
                     if (isImporting) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = i18n.text(MessageKey.SetupImportingMessage), // Need to add this key or use a literal for now
+                            text = i18n.text(MessageKey.SetupImportingMessage),
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -168,21 +243,78 @@ fun SetupSystemScreen(
         }
     }
 
-    if (showImportDialog) {
+    if (importSource != null) {
         AlertDialog(
-            onDismissRequest = { if (!isLoading) showImportDialog = false },
-            title = { Text(i18n.text(MessageKey.SetupImportTitle)) },
+            onDismissRequest = { if (!isLoading) importSource = null },
+            title = { 
+                Text(
+                    if (importSource == ImportSource.SIMPLY_PLURAL) i18n.text(MessageKey.SetupImportSimplyPlural)
+                    else i18n.text(MessageKey.SetupImportAmpersand)
+                ) 
+            },
             text = {
                 Column {
                     Text(i18n.text(MessageKey.SetupImportDescription))
+                    
+                    if (importSource == ImportSource.SIMPLY_PLURAL) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = importMethod == ImportMethod.API,
+                                onClick = { importMethod = ImportMethod.API }
+                            )
+                            Text(i18n.text(MessageKey.SetupImportMethodApi))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            RadioButton(
+                                selected = importMethod == ImportMethod.JSON,
+                                onClick = { importMethod = ImportMethod.JSON }
+                            )
+                            Text(i18n.text(MessageKey.SetupImportMethodJson))
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
-                        label = { Text(i18n.text(MessageKey.SetupApiKeyLabel)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+
+                    if (importMethod == ImportMethod.API) {
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it },
+                            label = { Text(i18n.text(MessageKey.SetupApiKeyLabel)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    } else {
+                        if (importSource == ImportSource.AMPERSAND) {
+                            Text(
+                                i18n.text(MessageKey.SetupImportAmpersandNote),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = filePickerLauncher,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(i18n.text(MessageKey.SetupImportFileLabel))
+                        }
+
+                        if (selectedFile != null) {
+                            Text(
+                                text = i18n.text(MessageKey.SetupImportFileSelected, selectedFile!!.name),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+
+                        if (jsonText.isNotBlank() && selectedFile == null) {
+                             // Fallback or indicator that text was pasted (though we prefer file)
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -191,10 +323,21 @@ fun SetupSystemScreen(
                         scope.launch {
                             isLoading = true
                             errorMessage = null
-                            showImportDialog = false
-                            val result = authService.importFromSimplyPlural(apiKey)
+                            val source = importSource!!
+                            val method = importMethod
+                            val data = jsonText
+                            importSource = null
+                            selectedFile = null
+                            
+                            val result = when (source) {
+                                ImportSource.SIMPLY_PLURAL -> {
+                                    if (method == ImportMethod.API) authService.importFromSimplyPlural(apiKey)
+                                    else authService.importFromSimplyPluralJson(data)
+                                }
+                                ImportSource.AMPERSAND -> authService.importFromAmpersand(data)
+                            }
+
                             if (result.isSuccess) {
-                                // result.getOrNull() would be the importId if needed
                                 isImporting = true
                                 offlineManager.setImporting(true)
                             } else {
@@ -203,13 +346,13 @@ fun SetupSystemScreen(
                             }
                         }
                     },
-                    enabled = apiKey.isNotBlank() && !isLoading
+                    enabled = (if (importMethod == ImportMethod.API) apiKey.isNotBlank() else jsonText.isNotBlank()) && !isLoading
                 ) {
                     Text(i18n.text(MessageKey.SetupImportButton))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showImportDialog = false }) {
+                TextButton(onClick = { importSource = null }) {
                     Text(i18n.text(MessageKey.CommonCancel))
                 }
             }

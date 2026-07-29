@@ -22,7 +22,9 @@ data class SystemResponse(
     val color: String? = null,
     val domain: String? = null,
     val userId: String? = null,
-    val type: FriendshipType? = null
+    val type: FriendshipType? = null,
+    val parentSystemId: String? = null,
+    val frontPrivacy: PrivacyLevel? = null
 )
 
 @Serializable
@@ -105,6 +107,11 @@ data class MemberGroup(
 )
 
 @Serializable
+data class TransferMemberDto(
+    val targetSystemId: String
+)
+
+@Serializable
 data class CreateGroupDto(
     val name: String? = null,
     val color: String? = null,
@@ -131,6 +138,13 @@ data class UpdateMemberGroupsDto(
 )
 
 @Serializable
+data class CreateSystemOrSubSystemDto(
+    val customName: String? = null,
+    val description: String? = null,
+    val parent: String? = null
+)
+
+@Serializable
 data class CreateSystemDto(
     val customName: String? = null,
     val description: String? = null
@@ -140,7 +154,8 @@ data class CreateSystemDto(
 data class UpdateSystemDto(
     val customName: String? = null,
     val description: String? = null,
-    val color: String? = null
+    val color: String? = null,
+    val frontPrivacy: PrivacyLevel? = null
 )
 
 @Serializable
@@ -333,7 +348,17 @@ data class FriendSystemView(
     val frontPrivacy: PrivacyLevel,
     val permissions: FriendshipPermissions,
     val activeFrontSessions: List<ActiveFrontSession>,
-    val members: List<MemberResponse>
+    val members: List<MemberResponse>,
+    val subsystems: List<FriendSystemView> = emptyList()
+)
+
+@Serializable
+data class FriendFrontSessionResponse(
+    val sessionId: String,
+    val member: MemberResponse,
+    val startTime: String,
+    val systemName: String,
+    val systemId: String
 )
 
 @Serializable

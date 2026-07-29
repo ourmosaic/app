@@ -7,6 +7,7 @@ import space.ourmosaic.app.createEncryptedSettings
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -14,10 +15,21 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import space.ourmosaic.app.utils.Logger
 
-class AuthService {
+class AuthService private constructor() {
+    companion object {
+        private val internalInstance by lazy { AuthService() }
+        
+        fun getInstance(): AuthService = internalInstance
+
+        // Pour compatibilité avec l'appel remember { AuthService() }
+        operator fun invoke(): AuthService = internalInstance
+    }
+
     private val client = HttpClient {
         install(ContentNegotiation) {
             json(Json {
@@ -25,11 +37,21 @@ class AuthService {
                 isLenient = true
             })
         }
+        install(Logging) {
+            logger = object : io.ktor.client.plugins.logging.Logger {
+                override fun log(message: String) {
+                    space.ourmosaic.app.utils.Logger.d("AuthServiceHTTP", message)
+                }
+            }
+            level = LogLevel.ALL
+        }
     }
 
     private val settings = createSettings()
     private val secureSettings = createEncryptedSettings()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private val refreshMutex = Mutex()
 
     private val _userMe = MutableStateFlow<UserMeResponse?>(null)
     val userMe: StateFlow<UserMeResponse?> = _userMe.asStateFlow()
@@ -39,6 +61,11 @@ class AuthService {
     private var memoryFederation: String? = null
 
     init {
+        // Hydrater le cache mémoire au démarrage
+        memoryFederation = settings.getStringOrNull("federation")
+        memoryAccessToken = secureSettings.getStringOrNull("access_token")
+        memoryRefreshToken = secureSettings.getStringOrNull("refresh_token")
+
         // Hydrater le StateFlow depuis le cache au démarrage
         val cached = settings.getStringOrNull("cached_user_me")
         if (cached != null) {
@@ -101,27 +128,68 @@ class AuthService {
         }
     }
 
+    /**
+     * Vérifie si une erreur 401 est réellement due à un token expiré
+     * et non à une erreur métier (comme SYSTEM_NOT_FOUND).
+     */
+    fun isTokenExpiredError(response: HttpResponse, body: String): Boolean {
+        if (response.status != HttpStatusCode.Unauthorized) return false
+        // Si le message contient SYSTEM_NOT_FOUND ou USER_NOT_FOUND, ce n'est pas un problème de token
+        // Dans ces cas, le 401 indique que la ressource n'est pas accessible, pas que le token est expiré.
+        return !body.contains("SYSTEM_NOT_FOUND") && 
+               !body.contains("USER_NOT_FOUND") && 
+               !body.contains("NO_SYSTEM_FOUND")
+    }
+
+    fun hasSystem(): Boolean {
+        val user = _userMe.value ?: return false
+        return user.isSystem || user.system != null || user.systems.isNotEmpty()
+    }
+
     suspend fun refreshToken(): Result<AuthenticationResponse> {
-        val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
-        val refreshToken = getRefreshToken() ?: return Result.failure(Exception("No refresh token stored"))
+        val currentToken = getAccessToken()
         
-        val url = "https://$federation/auth/token/refresh"
-        
-        return try {
-            val response = client.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(RefreshTokenRequest(refreshToken))
+        return refreshMutex.withLock {
+            // Vérifier si un autre thread a déjà rafraîchi le token pendant qu'on attendait le mutex
+            val latestToken = getAccessToken()
+            if (latestToken != null && latestToken != currentToken) {
+                Logger.d("AuthService", "Token was already refreshed by another request")
+                // On renvoie un succès minimal, les champs d'expiration ne sont pas critiques ici car
+                // l'appelant veut surtout savoir si le rafraîchissement a réussi.
+                return Result.success(AuthenticationResponse(latestToken, getRefreshToken() ?: "", 0, 0))
             }
-            if (response.status.isSuccess()) {
-                val authResponse = response.body<AuthenticationResponse>()
-                saveAuthData(federation, authResponse)
-                getUserMe()
-                Result.success(authResponse)
-            } else {
-                Result.failure(Exception("Refresh failed: ${response.status}"))
+
+            val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
+            val refreshToken = getRefreshToken() ?: return Result.failure(Exception("No refresh token stored"))
+            
+            val url = "https://$federation/auth/token/refresh"
+            Logger.d("AuthService", "Attempting token refresh...")
+
+            try {
+                val response = client.post(url) {
+                    contentType(ContentType.Application.Json)
+                    setBody(RefreshTokenRequest(refreshToken))
+                }
+                if (response.status.isSuccess()) {
+                    val authResponse = response.body<AuthenticationResponse>()
+                    saveAuthData(federation, authResponse)
+                    Logger.d("AuthService", "Token refresh successful")
+                    Result.success(authResponse)
+                } else {
+                    val error = response.bodyAsText()
+                    Logger.e("AuthService", "Token refresh failed: ${response.status} - $error")
+                    
+                    // Si le refresh token est invalide, la session est morte
+                    if (response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.BadRequest) {
+                        Logger.e("AuthService", "Refresh token invalid, logging out")
+                        logout()
+                    }
+                    Result.failure(Exception("Refresh failed: ${response.status}"))
+                }
+            } catch (e: Exception) {
+                Logger.e("AuthService", "Token refresh exception: ${e.message}")
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -135,18 +203,23 @@ class AuthService {
             val response = client.get(url) {
                 header(HttpHeaders.Authorization, "Bearer $token")
             }
+            
+            val responseBody = response.bodyAsText()
+
             if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
-                val refreshResult = refreshToken()
-                if (refreshResult.isSuccess) {
-                    return getUserMe(allowRetry = false)
+                if (isTokenExpiredError(response, responseBody)) {
+                    val refreshResult = refreshToken()
+                    if (refreshResult.isSuccess) {
+                        return getUserMe(allowRetry = false)
+                    }
                 }
             }
             if (response.status.isSuccess()) {
-                val userMeResponse = response.body<UserMeResponse>()
+                val userMeResponse = json.decodeFromString<UserMeResponse>(responseBody)
                 updateUserMe(userMeResponse)
                 Result.success(userMeResponse)
             } else {
-                Logger.e("AuthService", "getUserMe failed with status ${response.status}")
+                Logger.e("AuthService", "getUserMe failed with status ${response.status}: $responseBody")
                 // Si on a une réponse d'erreur du serveur (4xx, 5xx), on ne fallback pas forcément sur le cache
                 // car cela masquerait des changements importants (ex: compte désactivé, plus de système, etc.)
                 if (response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.Forbidden) {
@@ -183,7 +256,9 @@ class AuthService {
         settings["cached_user_me"] = json.encodeToString(UserMeResponse.serializer(), user)
         
         // Synchroniser le system_id pour les autres services
-        val systemId = user.system?.id
+        // On sélectionne par défaut le système racine (parentSystemId == null)
+        val systemId = user.systems.find { it.parentSystemId == null }?.id ?: user.system?.id
+
         if (systemId != null) {
             settings["system_id"] = systemId
         } else {
@@ -234,9 +309,9 @@ class AuthService {
         Logger.d("AuthService", "Auth data saved and cached in memory for federation: $federation")
     }
 
-    fun getFederation(): String? = memoryFederation ?: settings.getStringOrNull("federation")
-    fun getAccessToken(): String? = memoryAccessToken ?: secureSettings.getStringOrNull("access_token")
-    fun getRefreshToken(): String? = memoryRefreshToken ?: secureSettings.getStringOrNull("refresh_token")
+    fun getFederation(): String? = memoryFederation ?: settings.getStringOrNull("federation").also { memoryFederation = it }
+    fun getAccessToken(): String? = memoryAccessToken ?: secureSettings.getStringOrNull("access_token").also { memoryAccessToken = it }
+    fun getRefreshToken(): String? = memoryRefreshToken ?: secureSettings.getStringOrNull("refresh_token").also { memoryRefreshToken = it }
 
     suspend fun createSystem(allowRetry: Boolean = true): Result<Unit> {
         val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
@@ -248,19 +323,27 @@ class AuthService {
         }
 
         return try {
-            val response = client.post("https://$federation/v1/system/@me") {
+            val response = client.post("https://$federation/v2/system/@me") {
                 header(HttpHeaders.Authorization, "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody("{}") // Envoie un corps vide pour éviter le 400 si le backend l'exige
             }
+            
+            val responseBody = response.bodyAsText()
+
             if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
-                val refreshResult = refreshToken()
-                if (refreshResult.isSuccess) {
-                    return createSystem(allowRetry = false)
+                if (isTokenExpiredError(response, responseBody)) {
+                    val refreshResult = refreshToken()
+                    if (refreshResult.isSuccess) {
+                        return createSystem(allowRetry = false)
+                    }
                 }
             }
             if (response.status.isSuccess()) {
                 getUserMe() // Refresh cache and flow
                 Result.success(Unit)
             } else {
+                Logger.e("AuthService", "Failed to create system: ${response.status}, body: $responseBody")
                 Result.failure(Exception("Failed to create system: ${response.status}"))
             }
         } catch (e: Exception) {
@@ -278,18 +361,89 @@ class AuthService {
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("apiKey" to apiKey))
             }
+            
+            val responseBody = response.bodyAsText()
+
             if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
-                val refreshResult = refreshToken()
-                if (refreshResult.isSuccess) {
-                    return importFromSimplyPlural(apiKey, allowRetry = false)
+                if (isTokenExpiredError(response, responseBody)) {
+                    val refreshResult = refreshToken()
+                    if (refreshResult.isSuccess) {
+                        return importFromSimplyPlural(apiKey, allowRetry = false)
+                    }
                 }
             }
             if (response.status.isSuccess()) {
-                val body = response.body<Map<String, String>>()
+                val body = json.decodeFromString<Map<String, String>>(responseBody)
                 val importId = body["importId"] ?: ""
                 Result.success(importId)
             } else {
-                Result.failure(Exception("Import failed: ${response.status}"))
+                Result.failure(Exception("Import failed: ${response.status} - $responseBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importFromSimplyPluralJson(jsonData: String, allowRetry: Boolean = true): Result<String> {
+        val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
+        val token = getAccessToken() ?: return Result.failure(Exception("No access token stored"))
+
+        return try {
+            val response = client.post("https://$federation/v1/import/simplyplural") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(jsonData)
+            }
+            
+            val responseBody = response.bodyAsText()
+
+            if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
+                if (isTokenExpiredError(response, responseBody)) {
+                    val refreshResult = refreshToken()
+                    if (refreshResult.isSuccess) {
+                        return importFromSimplyPluralJson(jsonData, allowRetry = false)
+                    }
+                }
+            }
+            if (response.status.isSuccess()) {
+                val body = json.decodeFromString<Map<String, String>>(responseBody)
+                val importId = body["importId"] ?: ""
+                Result.success(importId)
+            } else {
+                Result.failure(Exception("Import failed: ${response.status} - $responseBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importFromAmpersand(jsonData: String, allowRetry: Boolean = true): Result<String> {
+        val federation = getFederation() ?: return Result.failure(Exception("No federation stored"))
+        val token = getAccessToken() ?: return Result.failure(Exception("No access token stored"))
+
+        return try {
+            val response = client.post("https://$federation/v1/import/ampersand") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(jsonData)
+            }
+            
+            val responseBody = response.bodyAsText()
+
+            if (response.status == HttpStatusCode.Unauthorized && allowRetry) {
+                if (isTokenExpiredError(response, responseBody)) {
+                    val refreshResult = refreshToken()
+                    if (refreshResult.isSuccess) {
+                        return importFromAmpersand(jsonData, allowRetry = false)
+                    }
+                }
+            }
+            if (response.status.isSuccess()) {
+                val body = json.decodeFromString<Map<String, String>>(responseBody)
+                val importId = body["importId"] ?: ""
+                Result.success(importId)
+            } else {
+                Result.failure(Exception("Import failed: ${response.status} - $responseBody"))
             }
         } catch (e: Exception) {
             Result.failure(e)

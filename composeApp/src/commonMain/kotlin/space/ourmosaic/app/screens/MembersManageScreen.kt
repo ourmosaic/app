@@ -44,6 +44,7 @@ enum class FrontMode {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MembersManageScreen(
+    systemId: String? = null,
     i18n: I18nState,
     appSettings: AppSettings,
     onBack: () -> Unit,
@@ -66,6 +67,7 @@ fun MembersManageScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedMemberIds by remember { mutableStateOf(setOf<String>()) }
     var showBulkDeleteConfirm by remember { mutableStateOf(false) }
+    var showBulkTransferDialog by remember { mutableStateOf(false) }
     var showDeleteGroupConfirm by remember { mutableStateOf(false) }
     
     val isSelectionMode = selectedMemberIds.isNotEmpty()
@@ -85,10 +87,18 @@ fun MembersManageScreen(
 
     val activeSessions = cachedSessions?.filter { it.endTime == null } ?: emptyList()
     val displayGroups = (cachedGroups ?: emptyList())
-        .filter { it.parentId == currentGroupId }
+        .filter { group ->
+            val expectedSystemId = systemId ?: appSettings.selectedSystemId
+            (group.systemId == expectedSystemId || group.id.startsWith("pending_")) && 
+            group.parentId == currentGroupId 
+        }
         .sortedBy { it.name?.lowercase() }
     
-    val displayMembers = (cachedMembers ?: emptyList()).map { member ->
+    val displayMembers = (cachedMembers ?: emptyList()).filter { member ->
+        // Priority to data matching the current systemId context
+        val expectedSystemId = systemId ?: appSettings.selectedSystemId
+        member.systemId == expectedSystemId || member.id.startsWith("pending_")
+    }.map { member ->
         member.copy(currentFrontSessions = activeSessions.filter { it.memberId == member.id })
     }.let { membersList ->
         val filtered = if (isSearchActive && searchQuery.isNotBlank()) {
@@ -116,14 +126,15 @@ fun MembersManageScreen(
     fun refresh() {
         scope.launch {
             isLoading = true
-            systemService.getMembers()
-            systemService.getFrontSessions()
-            systemService.getGroups()
+            offlineManager.resetMemoryCache()
+            systemService.getMembers(systemId)
+            systemService.getFrontSessions(systemId)
+            systemService.getGroups(systemId)
             isLoading = false
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(systemId) {
         refresh()
     }
 
@@ -191,7 +202,7 @@ fun MembersManageScreen(
                                 val members = (cachedMembers ?: emptyList()).filter { selectedMemberIds.contains(it.id) }
                                 val allDormant = members.all { it.inDormancy }
                                 members.forEach { m ->
-                                    systemService.updateMember(m.id, UpdateMemberDto(inDormancy = !allDormant))
+                                    systemService.updateMember(m.id, UpdateMemberDto(inDormancy = !allDormant), systemId = systemId)
                                 }
                                 selectedMemberIds = emptySet()
                             }
@@ -211,9 +222,9 @@ fun MembersManageScreen(
                                 members.forEach { m ->
                                     val sessions = activeSessions.filter { it.memberId == m.id }
                                     if (someFronting) {
-                                        sessions.forEach { s -> systemService.endFrontSession(m.id, s.id) }
+                                        sessions.forEach { s -> systemService.endFrontSession(m.id, s.id, systemId = systemId) }
                                     } else {
-                                        systemService.startFrontSession(m.id)
+                                        systemService.startFrontSession(m.id, systemId = systemId)
                                     }
                                 }
                                 selectedMemberIds = emptySet()
@@ -225,6 +236,9 @@ fun MembersManageScreen(
                                 if (someFronting) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, 
                                 contentDescription = i18n.text(MessageKey.BulkActionFront)
                             )
+                        }
+                        IconButton(onClick = { showBulkTransferDialog = true }) {
+                            Icon(Icons.Default.MoveToInbox, contentDescription = i18n.text(MessageKey.MemberTransferTitle))
                         }
                         IconButton(onClick = { showBulkDeleteConfirm = true }) {
                             Icon(Icons.Default.Delete, contentDescription = i18n.text(MessageKey.BulkActionDelete))
@@ -409,17 +423,17 @@ fun MembersManageScreen(
                                                             // Terminer les autres sessions d'abord
                                                             displayMembers.forEach { m ->
                                                                 m.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
-                                                                    systemService.endFrontSession(m.id, s.id)
+                                                                    systemService.endFrontSession(m.id, s.id, systemId = systemId)
                                                                 }
                                                             }
-                                                            systemService.startFrontSession(member.id)
+                                                            systemService.startFrontSession(member.id, systemId = systemId)
                                                         } else {
                                                             if (isFront) {
                                                                 member.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
-                                                                    systemService.endFrontSession(member.id, s.id)
+                                                                    systemService.endFrontSession(member.id, s.id, systemId = systemId)
                                                                 }
                                                             } else {
-                                                                systemService.startFrontSession(member.id)
+                                                                systemService.startFrontSession(member.id, systemId = systemId)
                                                             }
                                                         }
                                                     }
@@ -492,7 +506,7 @@ fun MembersManageScreen(
                                                 onClick = {
                                                     scope.launch {
                                                         member.currentFrontSessions.filter { it.endTime == null }.forEach { s ->
-                                                            systemService.endFrontSession(member.id, s.id)
+                                                            systemService.endFrontSession(member.id, s.id, systemId = systemId)
                                                         }
                                                     }
                                                 },
@@ -585,7 +599,7 @@ fun MembersManageScreen(
                                 name = groupName, 
                                 color = groupColor.ifBlank { null },
                                 parentId = currentGroupId
-                            ))
+                            ), systemId = systemId)
                             showAddGroupDialog = false
                             isCreating = false
                         }
@@ -668,7 +682,7 @@ fun MembersManageScreen(
                                 name = groupName, 
                                 color = groupColor.ifBlank { null },
                                 parentId = currentGroup.parentId
-                            ))
+                            ), systemId = systemId)
                             showEditGroupDialog = false
                             isUpdating = false
                         }
@@ -736,7 +750,7 @@ fun MembersManageScreen(
                         if (deleteTapCount >= 5) {
                             scope.launch {
                                 selectedMemberIds.forEach { id ->
-                                    systemService.deleteMember(id)
+                                    systemService.deleteMember(id, systemId = systemId)
                                 }
                                 selectedMemberIds = emptySet()
                                 showBulkDeleteConfirm = false
@@ -789,7 +803,7 @@ fun MembersManageScreen(
                             scope.launch {
                                 val idToDelete = currentGroupId!!
                                 val parent = (cachedGroups ?: emptyList()).find { it.id == idToDelete }?.parentId
-                                systemService.deleteGroup(idToDelete)
+                                systemService.deleteGroup(idToDelete, systemId = systemId)
                                 currentGroupId = parent
                                 showDeleteGroupConfirm = false
                                 deleteTapCount = 0
@@ -808,6 +822,70 @@ fun MembersManageScreen(
                     showDeleteGroupConfirm = false 
                     deleteTapCount = 0
                 }) {
+                    Text(i18n.text(MessageKey.CommonCancel))
+                }
+            }
+        )
+    }
+
+    if (showBulkTransferDialog) {
+        val systems by offlineManager.cachedSystems.collectAsState(initial = emptyList())
+        var selectedTargetSystemId by remember { mutableStateOf<String?>(null) }
+        var isTransferring by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isTransferring) showBulkTransferDialog = false },
+            title = { Text(i18n.text(MessageKey.MemberTransferTitle)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(i18n.text(MessageKey.MemberTransferTarget))
+                    
+                    val otherSystems = systems.filter { it.id != (systemId ?: "me") && it.id != "me" }
+                    
+                    if (otherSystems.isEmpty()) {
+                        Text(i18n.text(MessageKey.SystemSubSystemsEmpty), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        otherSystems.forEach { system ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedTargetSystemId = system.id }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedTargetSystemId == system.id,
+                                    onClick = { selectedTargetSystemId = system.id }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(system.customName ?: system.username ?: "Unknown")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val targetId = selectedTargetSystemId ?: return@TextButton
+                        scope.launch {
+                            isTransferring = true
+                            selectedMemberIds.forEach { memberId ->
+                                systemService.transferMember(memberId, TransferMemberDto(targetSystemId = targetId), systemId = systemId)
+                            }
+                            selectedMemberIds = emptySet()
+                            showBulkTransferDialog = false
+                            isTransferring = false
+                        }
+                    },
+                    enabled = selectedTargetSystemId != null && !isTransferring
+                ) {
+                    if (isTransferring) CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    else Text(i18n.text(MessageKey.CommonSave))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkTransferDialog = false }, enabled = !isTransferring) {
                     Text(i18n.text(MessageKey.CommonCancel))
                 }
             }
@@ -835,7 +913,7 @@ fun MembersManageScreen(
                     onClick = {
                         scope.launch {
                             isCreating = true
-                            systemService.createMember(CreateMemberDto(name = name)).onSuccess {
+                            systemService.createMember(CreateMemberDto(name = name), systemId = systemId).onSuccess {
                                 showAddDialog = false
                             }
                             isCreating = false

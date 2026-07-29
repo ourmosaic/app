@@ -41,7 +41,7 @@ actual fun showSimpleNotification(title: String, message: String, id: Int?) {
     center.addNotificationRequest(request) { _ -> }
 }
 
-actual fun startSseBackgroundService() {
+actual fun startSseBackgroundService(systemId: String?) {
     // Background execution on iOS is handled differently (Background Tasks API)
     // For now, we rely on the app being active or standard push notifications.
 }

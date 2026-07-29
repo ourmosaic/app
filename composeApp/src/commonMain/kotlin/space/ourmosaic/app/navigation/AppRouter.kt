@@ -43,6 +43,7 @@ fun AppRouter(
     navState: NavState,
     i18n: I18nState,
     appSettings: AppSettings,
+    currentSystemId: String?,
     onOpenDrawer: () -> Unit,
     onLogout: () -> Unit,
     systemService: SystemService,
@@ -51,31 +52,32 @@ fun AppRouter(
     offlineManager: OfflineManager,
     authService: AuthService,
     syncWorker: SyncWorker,
+    systemContextManager: space.ourmosaic.app.system.SystemContextManager,
     theme: space.ourmosaic.app.AppTheme,
     onThemeChange: (space.ourmosaic.app.AppTheme) -> Unit
 ) {
     val connectivityObserver = rememberConnectivityObserver()
 
-    LaunchedEffect(connectivityObserver) {
+    LaunchedEffect(connectivityObserver, currentSystemId) {
         connectivityObserver.observe().collect { status ->
-            Logger.d("AppRouter", "[SYNC_DEBUG] Connectivity status: $status")
+            Logger.d("AppRouter", "[SYNC_DEBUG] Connectivity status: $status for system: $currentSystemId")
             if (status == ConnectivityObserver.Status.Available) {
                 Logger.d("AppRouter", "[SYNC_DEBUG] Triggering sync and refresh")
-                syncWorker.sync()
+                syncWorker.sync(currentSystemId)
                 // Refresh data to ensure server truth after sync
-                systemService.getMembers()
-                systemService.getActiveFrontSessions(forceRefresh = true)
+                systemService.getMembers(currentSystemId)
+                systemService.getActiveFrontSessions(forceRefresh = true, systemId = currentSystemId)
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        // Initial sync and refresh on app start if logged in
+    LaunchedEffect(currentSystemId) {
+        // Initial sync and refresh on app start or system switch if logged in
         if (authService.getAccessToken() != null) {
-            Logger.d("AppRouter", "[SYNC_DEBUG] App start, triggering sync and refresh")
-            syncWorker.sync()
-            systemService.getMembers()
-            systemService.getActiveFrontSessions(forceRefresh = true)
+            Logger.d("AppRouter", "[SYNC_DEBUG] System switch or app start, triggering sync and refresh for $currentSystemId")
+            syncWorker.sync(currentSystemId)
+            systemService.getMembers(currentSystemId)
+            systemService.getActiveFrontSessions(forceRefresh = true, systemId = currentSystemId)
         }
     }
 
@@ -88,6 +90,7 @@ fun AppRouter(
 
         Route.Home -> HomeScreen(
             i18n = i18n,
+            currentSystemId = currentSystemId,
             onOpenDrawer = onOpenDrawer,
             onNavigate = { route -> navState.navigateTo(route) },
             systemService = systemService,
@@ -97,6 +100,7 @@ fun AppRouter(
 
         Route.Profile -> ProfileScreen(
             i18n = i18n,
+            currentSystemId = currentSystemId,
             onOpenDrawer = onOpenDrawer,
             onBack = navState::back,
             onNavigate = { route -> navState.navigateTo(route) },
@@ -105,36 +109,50 @@ fun AppRouter(
             authService = authService
         )
 
-        Route.System -> SystemScreen(
+        is Route.System -> SystemScreen(
+            systemId = (navState.currentRoute as Route.System).systemId,
             i18n = i18n,
             onOpenDrawer = onOpenDrawer,
             onBack = navState::back,
-            onManageMembers = { navState.navigateTo(Route.MembersManage) },
-            offlineManager = offlineManager
+            onManageMembers = { id -> navState.navigateTo(Route.MembersManage(id)) },
+            onNavigateToSubSystem = { id -> navState.navigateTo(Route.System(id)) },
+            onNavigateToChat = { id -> navState.navigateTo(Route.Chat(id)) },
+            offlineManager = offlineManager,
+            authService = authService,
+            systemService = systemService
         )
 
-        Route.MembersManage -> MembersManageScreen(
-            i18n = i18n,
-            appSettings = appSettings,
-            onBack = navState::back,
-            onEditMember = { id -> navState.navigateTo(Route.MemberEdit(id)) },
-            offlineManager = offlineManager,
-            systemService = systemService,
-            authService = authService
-        )
+        is Route.MembersManage -> {
+            val route = navState.currentRoute as Route.MembersManage
+            MembersManageScreen(
+                systemId = route.systemId,
+                i18n = i18n,
+                appSettings = appSettings,
+                onBack = navState::back,
+                onEditMember = { id -> navState.navigateTo(Route.MemberEdit(id, route.systemId)) },
+                offlineManager = offlineManager,
+                systemService = systemService,
+                authService = authService
+            )
+        }
 
-        is Route.MemberEdit -> MemberEditScreen(
-            memberId = (navState.currentRoute as Route.MemberEdit).memberId,
-            i18n = i18n,
-            onBack = navState::back,
-            systemService = systemService,
-            offlineManager = offlineManager,
-            authService = authService
-        )
+        is Route.MemberEdit -> {
+            val route = navState.currentRoute as Route.MemberEdit
+            MemberEditScreen(
+                memberId = route.memberId,
+                systemId = route.systemId,
+                i18n = i18n,
+                onBack = navState::back,
+                systemService = systemService,
+                offlineManager = offlineManager,
+                authService = authService
+            )
+        }
 
         Route.Settings -> SettingsScreen(
             i18n = i18n,
             appSettings = appSettings,
+            currentSystemId = currentSystemId,
             onOpenDrawer = onOpenDrawer,
             onLogout = onLogout,
             offlineManager = offlineManager,
@@ -147,6 +165,7 @@ fun AppRouter(
 
         Route.BlockedEntities -> BlockedEntitiesScreen(
             i18n = i18n,
+            currentSystemId = currentSystemId,
             onBack = navState::back,
             systemService = systemService
         )
@@ -154,34 +173,55 @@ fun AppRouter(
         Route.CacheDetail -> CacheDetailScreen(
             i18n = i18n,
             onBack = navState::back,
-            offlineManager = offlineManager
+            offlineManager = offlineManager,
+            authService = authService,
+            currentSystemId = currentSystemId
         )
 
-        Route.Chat -> ChatScreen(
-            channelId = null,
-            i18n = i18n,
-            onOpenDrawer = onOpenDrawer,
-            onNavigate = { navState.navigateTo(it) },
-            chatService = chatService,
-            systemService = systemService,
-            offlineManager = offlineManager,
-            authService = authService
-        )
+        is Route.Chat -> {
+            val route = navState.currentRoute as Route.Chat
+            ChatScreen(
+                channelId = null,
+                systemId = route.systemId,
+                i18n = i18n,
+                onOpenDrawer = onOpenDrawer,
+                onNavigate = { navState.navigateTo(it) },
+                chatService = chatService,
+                systemService = systemService,
+                systemContextManager = systemContextManager,
+                navState = navState,
+                offlineManager = offlineManager,
+                authService = authService
+            )
+        }
 
-        is Route.ChatChannel -> ChatScreen(
-            channelId = (navState.currentRoute as Route.ChatChannel).channelId,
-            i18n = i18n,
-            onOpenDrawer = onOpenDrawer,
-            onNavigate = { navState.navigateTo(it) },
-            chatService = chatService,
-            systemService = systemService,
-            offlineManager = offlineManager,
-            authService = authService
-        )
+        is Route.ChatChannel -> {
+            val route = navState.currentRoute as Route.ChatChannel
+            ChatScreen(
+                channelId = route.channelId,
+                systemId = route.systemId,
+                i18n = i18n,
+                onOpenDrawer = onOpenDrawer,
+                onNavigate = { navState.navigateTo(it) },
+                chatService = chatService,
+                systemService = systemService,
+                systemContextManager = systemContextManager,
+                navState = navState,
+                offlineManager = offlineManager,
+                authService = authService
+            )
+        }
 
         Route.SetupSystem -> SetupSystemScreen(
             i18n = i18n,
-            onSetupComplete = { navState.navigateTo(Route.Home) },
+            currentSystemId = currentSystemId,
+            onSetupComplete = { systemId -> 
+                if (systemId != null) {
+                    navState.replaceLast(Route.System(systemId))
+                } else {
+                    navState.navigateTo(Route.Home) 
+                }
+            },
             onSkip = { navState.back() },
             systemService = systemService,
             sseService = sseService,
@@ -191,6 +231,7 @@ fun AppRouter(
 
         Route.Friends -> FriendsScreen(
             i18n = i18n,
+            currentSystemId = currentSystemId,
             onBack = navState::back,
             systemService = systemService,
             offlineManager = offlineManager,
@@ -204,6 +245,7 @@ fun AppRouter(
                 friendId = route.friendId,
                 initialPage = route.initialPage,
                 i18n = i18n,
+                currentSystemId = currentSystemId,
                 onBack = navState::back,
                 onNavigate = { navState.navigateTo(it) },
                 onTabChange = { page ->
@@ -219,14 +261,14 @@ fun AppRouter(
             var member by remember { mutableStateOf<space.ourmosaic.app.system.MemberResponse?>(null) }
             var isLoading by remember { mutableStateOf(true) }
             
-            LaunchedEffect(memberId) {
+            LaunchedEffect(memberId, currentSystemId) {
                 isLoading = true
                 // Try cache first
                 offlineManager.getCachedMembers()?.find { it.id == memberId }?.let {
                     member = it
                     isLoading = false
                 } ?: run {
-                    systemService.getMembers().onSuccess { members ->
+                    systemService.getMembers(currentSystemId).onSuccess { members ->
                         member = members.find { it.id == memberId }
                         isLoading = false
                     }.onFailure {
@@ -244,6 +286,7 @@ fun AppRouter(
                     FriendMemberDetailScreen(
                         member = it,
                         i18n = i18n,
+                        currentSystemId = currentSystemId,
                         onBack = navState::back,
                         onEdit = { id -> navState.navigateTo(Route.MemberEdit(id)) },
                         authService = authService,
@@ -258,9 +301,9 @@ fun AppRouter(
             var member by remember { mutableStateOf<space.ourmosaic.app.system.MemberResponse?>(null) }
             var isLoading by remember { mutableStateOf(true) }
 
-            LaunchedEffect(route.friendId, route.memberId) {
+            LaunchedEffect(route.friendId, route.memberId, currentSystemId) {
                 isLoading = true
-                systemService.getFriendMembers(route.friendId).onSuccess { members ->
+                systemService.getFriendMembers(route.friendId, currentSystemId).onSuccess { members ->
                     member = members.find { it.id == route.memberId }
                     isLoading = false
                 }.onFailure {
@@ -277,6 +320,7 @@ fun AppRouter(
                     FriendMemberDetailScreen(
                         member = it,
                         i18n = i18n,
+                        currentSystemId = currentSystemId,
                         onBack = navState::back,
                         onEdit = { id -> navState.navigateTo(Route.MemberEdit(id)) },
                         authService = authService,

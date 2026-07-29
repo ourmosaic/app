@@ -2,6 +2,8 @@ package space.ourmosaic.app.system
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
@@ -20,22 +22,33 @@ class AppController(
     val offlineManager: OfflineManager,
     val systemService: SystemService,
     val syncWorker: SyncWorker,
-    val sseService: SseService
+    val chatSyncWorker: ChatSyncWorker,
+    val sseService: SseService,
+    val chatService: ChatService
 ) {
     private var controllerScope: CoroutineScope? = null
     private var syncJob: Job? = null
     private var sseJob: Job? = null
     private var notificationJob: Job? = null
 
-    fun start(scope: CoroutineScope, i18nState: I18nState, appSettings: AppSettings) {
+    companion object {
+        private val _sseEvents = kotlinx.coroutines.flow.MutableSharedFlow<SseEvent>()
+        val sseEvents = _sseEvents.asSharedFlow()
+    }
+
+    fun start(scope: CoroutineScope, i18nState: I18nState, appSettings: AppSettings, currentSystemIdFlow: Flow<String?>) {
         controllerScope = scope
 
         scope.launch {
-            authService.userMe.collect { user ->
+            combine(authService.userMe, currentSystemIdFlow) { user, systemId ->
+                user to systemId
+            }.collect { (user, _) ->
                 if (user != null) {
                     offlineManager.cacheUserMe(user)
                     syncWorker.start(this)
+                    chatSyncWorker.startSync(this)
                     authService.getUserMe()
+                    systemService.getSystems()
                 } else {
                     syncWorker.stop()
                 }
@@ -43,9 +56,11 @@ class AppController(
         }
 
         scope.launch {
-            authService.userMe.collect { user ->
+            combine(authService.userMe, currentSystemIdFlow) { user, systemId ->
+                user to systemId
+            }.collect { (user, systemId) ->
                 if (user != null) {
-                    sseService.startStreaming(this)
+                    sseService.startStreaming(this, systemId)
                 } else {
                     sseService.stopStreaming()
                 }
@@ -54,6 +69,7 @@ class AppController(
 
         scope.launch {
             sseService.events.collect { event ->
+                _sseEvents.emit(event)
                 handleSseEvent(event, i18nState)
             }
         }
@@ -86,6 +102,7 @@ class AppController(
                 if (needsMembers && authService.getAccessToken() != null) {
                     scope.launch {
                         systemService.getMembers()
+                        systemService.getSystems()
                     }
                 }
                 updateFrontNotification(fronterNames)
@@ -110,6 +127,7 @@ class AppController(
             }
             SseTopics.IMPORT -> {
                 handleImportEvent(event, i18nState)
+                systemService.getSystems()
             }
             SseTopics.BLOCKS -> {
                 systemService.getBlockedUsers()
@@ -118,10 +136,6 @@ class AppController(
             }
             SseTopics.REPORTS -> {
                 // Reports are usually handled by moderators, but we might want to refresh something if needed
-            }
-            SseTopics.CHAT_MESSAGE, SseTopics.CHAT_CHANNEL -> {
-                // These are usually handled directly by the ChatScreen if it's active
-                // But we could trigger a global refresh or a notification if needed
             }
         }
     }

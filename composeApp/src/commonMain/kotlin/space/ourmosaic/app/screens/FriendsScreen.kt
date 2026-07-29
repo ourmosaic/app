@@ -26,6 +26,7 @@ import space.ourmosaic.app.system.*
 @Composable
 fun FriendsScreen(
     i18n: I18nState,
+    currentSystemId: String?,
     onBack: () -> Unit,
     systemService: SystemService,
     offlineManager: OfflineManager,
@@ -40,10 +41,10 @@ fun FriendsScreen(
     var showAddFriendDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(Unit) {
-        systemService.getFriends()
-        systemService.getReceivedFriendRequests()
-        systemService.getSentFriendRequests()
+    LaunchedEffect(currentSystemId) {
+        systemService.getFriends(currentSystemId)
+        systemService.getReceivedFriendRequests(currentSystemId)
+        systemService.getSentFriendRequests(currentSystemId)
     }
 
     Scaffold(
@@ -58,9 +59,9 @@ fun FriendsScreen(
                 actions = {
                     IconButton(onClick = { 
                         scope.launch {
-                            systemService.getFriends()
-                            systemService.getReceivedFriendRequests()
-                            systemService.getSentFriendRequests()
+                            systemService.getFriends(currentSystemId)
+                            systemService.getReceivedFriendRequests(currentSystemId)
+                            systemService.getSentFriendRequests(currentSystemId)
                         }
                     }) {
                         Icon(Icons.Default.Refresh, contentDescription = i18n.text(MessageKey.CommonRefresh))
@@ -108,7 +109,7 @@ fun FriendsScreen(
                 verticalAlignment = Alignment.Top
             ) { page ->
                 when (page) {
-                    0 -> FriendsList(friends, i18n, systemService, authService, snackbarHostState, onFriendClick)
+                    0 -> FriendsList(friends, currentSystemId, i18n, systemService, authService, snackbarHostState, onFriendClick)
                     1 -> FriendRequestsList(receivedRequests, i18n, systemService, authService, snackbarHostState)
                     2 -> SentRequestsList(sentRequests, i18n, systemService, authService, snackbarHostState)
                 }
@@ -125,7 +126,7 @@ fun FriendsScreen(
                     val result = systemService.sendFriendRequest(SendFriendRequestDto(
                         username = username,
                         federationUrl = federationUrl
-                    ))
+                    ), currentSystemId)
                     
                     showAddFriendDialog = false
                     
@@ -144,6 +145,7 @@ fun FriendsScreen(
 @Composable
 fun FriendsList(
     friends: List<SystemResponse>,
+    currentSystemId: String?,
     i18n: I18nState,
     systemService: SystemService,
     authService: AuthService,
@@ -152,6 +154,20 @@ fun FriendsList(
 ) {
     val scope = rememberCoroutineScope()
     var friendToRemove by remember { mutableStateOf<SystemResponse?>(null) }
+    val globalStatuses = remember { mutableStateMapOf<String, List<FriendFrontSessionResponse>>() }
+
+    LaunchedEffect(friends) {
+        friends.forEach { friend ->
+            val userId = friend.userId ?: return@forEach
+            scope.launch {
+                val result = systemService.getUserActiveFrontSessions(userId)
+                if (result.isSuccess) {
+                    val sessions = result.getOrNull() ?: emptyList()
+                    globalStatuses[friend.id] = sessions
+                }
+            }
+        }
+    }
 
     if (friends.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -163,7 +179,20 @@ fun FriendsList(
                 ListItem(
                     modifier = Modifier.clickable { onFriendClick(friend.id) },
                     headlineContent = { Text(friend.customName ?: friend.username ?: "No Name") },
-                    supportingContent = { Text(friend.id) },
+                    supportingContent = {
+                        Column {
+                            Text(friend.id)
+                            val sessions = globalStatuses[friend.id]
+                            if (!sessions.isNullOrEmpty()) {
+                                val systems = sessions.map { it.systemName }.distinct().joinToString(", ")
+                                Text(
+                                    i18n.text(MessageKey.FriendStatusGlobalFront, systems),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    },
                     leadingContent = {
                         MosaicAvatar(
                             avatarUrl = friend.avatarUrl,
@@ -212,7 +241,7 @@ fun FriendsList(
                                 val id = friendToRemove?.id
                                 if (id != null) {
                                     scope.launch {
-                                        val result = systemService.removeFriend(id)
+                                        val result = systemService.removeFriend(id, currentSystemId)
                                         if (result.isSuccess) {
                                             snackbarHostState.showSnackbar(i18n.text(MessageKey.FriendsRemoveSuccess))
                                         } else {

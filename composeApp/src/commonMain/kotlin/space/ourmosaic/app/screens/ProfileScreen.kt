@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ProfileScreen(
     i18n: I18nState,
+    currentSystemId: String?,
     onOpenDrawer: () -> Unit,
     onBack: () -> Unit,
     onNavigate: (Route) -> Unit,
@@ -46,7 +47,13 @@ fun ProfileScreen(
 ) {
     val scope = rememberCoroutineScope()
     val user by offlineManager.cachedUserMe.collectAsState(null)
-    
+    val systems by offlineManager.cachedSystems.collectAsState(initial = emptyList())
+
+    val currentSystem = remember(currentSystemId, user, systems) {
+        if (currentSystemId == null || currentSystemId == "@me") user?.system
+        else systems.find { it.id == currentSystemId } ?: user?.system
+    }
+
     val cachedSessions by offlineManager.cachedFrontSessions.collectAsState(initial = emptyList())
     val activeSessions = remember(cachedSessions) { cachedSessions?.filter { it.endTime == null } ?: emptyList() }
     
@@ -58,7 +65,7 @@ fun ProfileScreen(
             val userResult = authService.getUserMe()
             if (userResult.isSuccess) {
                 userResult.getOrNull()?.let { offlineManager.cacheUserMe(it) }
-                systemService.getActiveFrontSessions(forceRefresh = true)
+                systemService.getActiveFrontSessions(forceRefresh = true, systemId = currentSystemId)
                 isLoading = false
             } else {
                 error = userResult.exceptionOrNull()?.message
@@ -67,7 +74,7 @@ fun ProfileScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(currentSystemId) {
         refresh()
     }
 
@@ -108,10 +115,10 @@ fun ProfileScreen(
             ) {
                 user?.let { userInfo ->
                     item {
-                        ProfileHeader(userInfo)
+                        ProfileHeader(userInfo, currentSystem, authService)
                     }
 
-                    userInfo.system?.let { system ->
+                    currentSystem?.let { system ->
                         item {
                             SystemSection(system, i18n)
                         }
@@ -154,7 +161,7 @@ fun ProfileScreen(
                             val member = cachedMembers?.find { it.id == session.memberId } ?: session.member
                             
                             member?.let {
-                                MemberItem(it) {
+                                MemberItem(it, authService) {
                                     onNavigate(Route.MemberDetail(it.id))
                                 }
                             }
@@ -171,14 +178,16 @@ fun ProfileScreen(
 }
 
 @Composable
-fun ProfileHeader(user: UserMeResponse) {
-    val authService = remember { AuthService() }
+fun ProfileHeader(user: UserMeResponse, currentSystem: space.ourmosaic.app.system.SystemResponse?, authService: AuthService) {
+    val displayName = currentSystem?.customName ?: user.username
+    val avatarUrl = currentSystem?.avatarUrl ?: user.system?.avatarUrl
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
     ) {
         MosaicAvatar(
-            avatarUrl = user.system?.avatarUrl,
+            avatarUrl = avatarUrl,
             size = 80.dp,
             cornerRadius = 40.dp, // Cercle pour le profil principal
             authService = authService
@@ -188,7 +197,7 @@ fun ProfileHeader(user: UserMeResponse) {
 
         Column {
             Text(
-                text = user.username,
+                text = displayName,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -246,8 +255,7 @@ fun SystemSection(system: space.ourmosaic.app.system.SystemResponse, i18n: I18nS
 }
 
 @Composable
-fun MemberItem(member: MemberResponse, onClick: () -> Unit) {
-    val authService = remember { AuthService() }
+fun MemberItem(member: MemberResponse, authService: AuthService, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth()
             .clickable { onClick() },

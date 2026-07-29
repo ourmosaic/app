@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Public
@@ -137,6 +138,7 @@ fun GroupTreeItem(
 @Composable
 fun MemberEditScreen(
     memberId: String,
+    systemId: String? = null,
     i18n: I18nState,
     onBack: () -> Unit,
     systemService: SystemService,
@@ -166,7 +168,9 @@ fun MemberEditScreen(
     var showDayMonthPicker by remember { mutableStateOf(false) }
     var showMonthYearPicker by remember { mutableStateOf(false) }
     var showDateTimePicker by remember { mutableStateOf(false) }
-    var editingColorFieldId by remember { mutableStateOf<String?>(null) } // null = main member color, otherwise = custom field ID
+    var showTransferDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var editingColorFieldId by remember { mutableStateOf<String?>(null) }
     var editingDateFieldId by remember { mutableStateOf<String?>(null) }
     var editingDayMonthFieldId by remember { mutableStateOf<String?>(null) }
     var editingMonthYearFieldId by remember { mutableStateOf<String?>(null) }
@@ -219,9 +223,9 @@ fun MemberEditScreen(
     }
 
     LaunchedEffect(memberId) {
-        systemService.getMembers()
-        systemService.getCustomFields()
-        systemService.getGroups()
+        systemService.getMembers(systemId = systemId)
+        systemService.getCustomFields(systemId = systemId)
+        systemService.getGroups(systemId = systemId)
     }
     Scaffold(
         topBar = {
@@ -246,20 +250,20 @@ fun MemberEditScreen(
                                     privacy = privacy,
                                     inDormancy = inDormancy
                                 )
-                                val updateRes = systemService.updateMember(memberId, updateDto)
+                                val updateRes = systemService.updateMember(memberId, updateDto, systemId = systemId)
                                 
                                 // Update groups
                                 val addedGroups = selectedGroupIds.filter { !initialGroupIds.contains(it) }
                                 val removedGroups = initialGroupIds.filter { !selectedGroupIds.contains(it) }
 
                                 if (selectedGroupIds != initialGroupIds) {
-                                    systemService.updateMemberGroups(memberId, selectedGroupIds.toList())
+                                    systemService.updateMemberGroups(memberId, selectedGroupIds.toList(), systemId = systemId)
                                 }
 
                                 fieldValues.forEach { (fieldId, value) ->
                                     val originalValue = member?.customFieldValues?.find { it.customFieldId == fieldId }?.value ?: ""
                                     if (value != originalValue) {
-                                        systemService.updateMemberField(memberId, fieldId, value)
+                                        systemService.updateMemberField(memberId, fieldId, value, systemId = systemId)
                                     }
                                 }
                                 onBack()
@@ -328,7 +332,7 @@ fun MemberEditScreen(
                                 isSaving = true
                                 try {
                                     val croppedBytes = cropImage(bytes, x, y, size)
-                                    val result = systemService.uploadMemberAvatar(memberId, croppedBytes)
+                                    val result = systemService.uploadMemberAvatar(memberId, croppedBytes, systemId = systemId)
                                     result.onSuccess {
                                         avatarUpdateTicket++
                                     }
@@ -773,17 +777,94 @@ fun MemberEditScreen(
 
                 HorizontalDivider()
 
-                // Delete Button
-                var showDeleteConfirm by remember { mutableStateOf(false) }
-                OutlinedButton(
-                    onClick = { showDeleteConfirm = true },
+                // Delete & Transfer Section
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Close, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(i18n.text(MessageKey.CommonDelete))
+                    OutlinedButton(
+                        onClick = { showTransferDialog = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.MoveToInbox, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(i18n.text(MessageKey.MemberTransferTitle))
+                    }
+
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Close, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(i18n.text(MessageKey.CommonDelete))
+                    }
+                }
+
+                if (showTransferDialog) {
+                    val systems by offlineManager.cachedSystems.collectAsState(initial = emptyList())
+                    var selectedTargetSystemId by remember { mutableStateOf<String?>(null) }
+                    var isTransferring by remember { mutableStateOf(false) }
+
+                    AlertDialog(
+                        onDismissRequest = { if (!isTransferring) showTransferDialog = false },
+                        title = { Text(i18n.text(MessageKey.MemberTransferTitle)) },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(i18n.text(MessageKey.MemberTransferTarget))
+                                
+                                val otherSystems = systems.filter { it.id != (systemId ?: "me") && it.id != "me" }
+                                
+                                if (otherSystems.isEmpty()) {
+                                    Text(i18n.text(MessageKey.SystemSubSystemsEmpty), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                } else {
+                                    otherSystems.forEach { system ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { selectedTargetSystemId = system.id }
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = selectedTargetSystemId == system.id,
+                                                onClick = { selectedTargetSystemId = system.id }
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(system.customName ?: system.username ?: "Unknown")
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    val targetId = selectedTargetSystemId ?: return@TextButton
+                                    scope.launch {
+                                        isTransferring = true
+                                        systemService.transferMember(memberId, TransferMemberDto(targetSystemId = targetId), systemId = systemId)
+                                        showTransferDialog = false
+                                        isTransferring = false
+                                        onBack()
+                                    }
+                                },
+                                enabled = selectedTargetSystemId != null && !isTransferring
+                            ) {
+                                if (isTransferring) CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                else Text(i18n.text(MessageKey.CommonSave))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showTransferDialog = false }, enabled = !isTransferring) {
+                                Text(i18n.text(MessageKey.CommonCancel))
+                            }
+                        }
+                    )
                 }
 
                 if (showDeleteConfirm) {
@@ -808,7 +889,7 @@ fun MemberEditScreen(
                                     deleteTapCount++
                                     if (deleteTapCount >= 5) {
                                         scope.launch {
-                                            systemService.deleteMember(memberId)
+                                            systemService.deleteMember(memberId, systemId = systemId)
                                             onBack()
                                         }
                                     }

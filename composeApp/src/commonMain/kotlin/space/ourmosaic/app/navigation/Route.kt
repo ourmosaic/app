@@ -18,22 +18,22 @@ sealed class Route(val icon: ImageVector, val titleKey: MessageKey) {
     data object Login : Route(Icons.Default.Lock, MessageKey.LoginTitle)
     data object Home : Route(Icons.Default.Home, MessageKey.HomeTitle)
     data object Profile : Route(Icons.Default.AccountCircle, MessageKey.ProfileTitle)
-    data object System : Route(Icons.Default.Settings, MessageKey.SystemTitle)
-    data object MembersManage : Route(Icons.Default.Groups, MessageKey.MembersManageTitle)
-    data class MemberEdit(val memberId: String) : Route(Icons.Default.Edit, MessageKey.MembersManageTitle)
+    data class System(val systemId: String? = null) : Route(Icons.Default.Settings, MessageKey.SystemTitle)
+    data class MembersManage(val systemId: String? = null) : Route(Icons.Default.Groups, MessageKey.MembersManageTitle)
+    data class MemberEdit(val memberId: String, val systemId: String? = null) : Route(Icons.Default.Edit, MessageKey.MembersManageTitle)
     data object Settings : Route(Icons.Default.Tune, MessageKey.SettingsTitle)
     data object SetupSystem : Route(Icons.Default.Add, MessageKey.SetupSystemTitle)
     data object Friends : Route(Icons.Default.People, MessageKey.FriendsTitle)
-    data class FriendSystem(val friendId: String, val initialPage: Int = 0) : Route(Icons.Default.People, MessageKey.FriendsTitle)
+    data class FriendSystem(val friendId: String, val initialPage: Int = 0, val currentSystemId: String? = null) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data class MemberDetail(val memberId: String) : Route(Icons.Default.AccountCircle, MessageKey.ProfileTitle)
     data class FriendMemberDetail(val friendId: String, val memberId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data object BlockedEntities : Route(Icons.Default.Lock, MessageKey.SafetyBlockedEntities)
     data object CacheDetail : Route(Icons.Default.Tune, MessageKey.SettingsViewCache)
-    data object Chat : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
-    data class ChatChannel(val channelId: String) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
+    data class Chat(val systemId: String? = null) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
+    data class ChatChannel(val channelId: String, val systemId: String? = null) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
 
     companion object {
-        val all get() = listOf(Home, Profile, Friends, Chat, System, MembersManage, Settings, BlockedEntities)
+        val all get() = listOf(Home, Profile, Friends, Chat(), System(), MembersManage(), Settings, BlockedEntities)
     }
 }
 

@@ -21,6 +21,7 @@ import space.ourmosaic.app.system.*
 @Composable
 fun BlockedEntitiesScreen(
     i18n: I18nState,
+    currentSystemId: String?,
     onBack: () -> Unit,
     systemService: SystemService
 ) {
@@ -39,9 +40,9 @@ fun BlockedEntitiesScreen(
 
     val loadData = suspend {
         isLoading = true
-        val users = systemService.getBlockedUsers()
-        val systems = systemService.getBlockedSystems()
-        val members = systemService.getBlockedMembers()
+        val users = systemService.getBlockedUsers(currentSystemId)
+        val systems = systemService.getBlockedSystems(currentSystemId)
+        val members = systemService.getBlockedMembers(currentSystemId)
         
         blockedUsers = users.getOrDefault(emptyList())
         blockedSystems = systems.getOrDefault(emptyList())
@@ -49,7 +50,7 @@ fun BlockedEntitiesScreen(
         isLoading = false
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(currentSystemId) {
         loadData()
     }
 
@@ -87,7 +88,7 @@ fun BlockedEntitiesScreen(
                         i18n = i18n,
                         onUnblock = { id ->
                             scope.launch {
-                                systemService.unblockEntity(UnblockRequest(BlockType.USER, id))
+                                systemService.unblockEntity(UnblockRequest(BlockType.USER, id), currentSystemId)
                                 loadData()
                             }
                         },
@@ -98,7 +99,7 @@ fun BlockedEntitiesScreen(
                         i18n = i18n,
                         onUnblock = { id ->
                             scope.launch {
-                                systemService.unblockEntity(UnblockRequest(BlockType.SYSTEM, id))
+                                systemService.unblockEntity(UnblockRequest(BlockType.SYSTEM, id), currentSystemId)
                                 loadData()
                             }
                         },
@@ -109,7 +110,7 @@ fun BlockedEntitiesScreen(
                         i18n = i18n,
                         onUnblock = { id ->
                             scope.launch {
-                                systemService.unblockEntity(UnblockRequest(BlockType.MEMBER, id))
+                                systemService.unblockEntity(UnblockRequest(BlockType.MEMBER, id), currentSystemId)
                                 loadData()
                             }
                         },

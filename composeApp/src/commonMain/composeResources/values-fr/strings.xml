@@ -7,5 +7,13 @@
     <string name="settings_title">Reglages</string>
 
     <string name="common_back">Retour</string>
+
+    <string name="sub_systems_title">Sous-systèmes</string>
+    <string name="sub_systems_create">Créer un sous-système</string>
+    <string name="sub_systems_select">Sélectionner un système</string>
+    <string name="sub_systems_name_label">Nom du sous-système</string>
+    <string name="sub_systems_description_label">Description</string>
+    <string name="sub_systems_save">Enregistrer le sous-système</string>
+    <string name="sub_systems_empty">Aucun sous-système trouvé.</string>
 </resources>
 

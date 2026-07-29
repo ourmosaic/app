@@ -11,10 +11,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.components.MosaicAvatar
+import space.ourmosaic.app.components.SystemSwitcher
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
 import space.ourmosaic.app.navigation.Route
@@ -44,20 +47,26 @@ import space.ourmosaic.app.utils.Logger
 import space.ourmosaic.app.utils.DateTimeUtils
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import space.ourmosaic.app.offline.ChatMessageQueueType
 
 @Composable
 fun ChatScreen(
     channelId: String? = null,
+    systemId: String? = null,
     chatService: ChatService,
     authService: AuthService,
     offlineManager: OfflineManager,
     systemService: SystemService,
+    systemContextManager: SystemContextManager,
+    navState: space.ourmosaic.app.navigation.NavState,
     i18n: I18nState,
     onNavigate: (Route) -> Unit,
     onOpenDrawer: () -> Unit
 ) {
-    var channels by remember { mutableStateOf(offlineManager.getCachedChatChannels() ?: emptyList()) }
-    var currentChannel by remember { mutableStateOf<ChatChannelResponse?>(null) }
+    val channels by offlineManager.cachedChatChannels(systemId).collectAsState(initial = emptyList())
+    val currentChannel = remember(channelId, channels) {
+        channels.find { it.id == channelId }
+    }
     var messages by remember { mutableStateOf<List<ChatMessageResponse>>(emptyList()) }
     var members by remember { mutableStateOf(emptyList<MemberResponse>()) }
     var lastSenders by remember { mutableStateOf(emptyList<MemberResponse>()) }
@@ -97,34 +106,37 @@ fun ChatScreen(
     }
 
     // Initial load
-    LaunchedEffect(Unit) {
-        chatService.getChatChannels().onSuccess { 
-            channels = it
-            offlineManager.cacheChatChannels(it)
+    LaunchedEffect(systemId) {
+        chatService.getChatChannels(systemId).onSuccess {
+            offlineManager.cacheChatChannels(it, systemId)
+        }.onFailure {
+            // Handle error
         }
-        systemService.getMembers().onSuccess { 
+        systemService.getMembers(systemId).onSuccess { 
             members = it
             if (selectedSender == null && it.isNotEmpty()) {
                 selectedSender = it.first()
             }
         }
+        systemService.getActiveFrontSessions(systemId = systemId).onSuccess {
+            offlineManager.cacheFrontSessions(it, systemId = systemId)
+        }
     }
 
     // Load messages and last senders when channel changes
-    LaunchedEffect(channelId) {
+    LaunchedEffect(channelId, systemId) {
         if (channelId != null) {
-            messages = offlineManager.getCachedChatMessages(channelId) ?: emptyList()
+            messages = offlineManager.getCachedChatMessages(channelId, systemId) ?: emptyList()
             hasMoreMessages = true
             isLoadingMessages = true
-            chatService.getMessages(channelId).onSuccess { 
+            chatService.getMessages(channelId, systemId).onSuccess { 
                 val newMessages = sortMessages(it)
                 messages = newMessages
-                offlineManager.cacheChatMessages(channelId, newMessages)
+                offlineManager.cacheChatMessages(channelId, newMessages, systemId)
                 hasMoreMessages = it.size >= 50
             }
-            chatService.getLastKnownSenders(channelId).onSuccess { lastSenders = it }
+            chatService.getLastKnownSenders(channelId, systemId).onSuccess { lastSenders = it }
             isLoadingMessages = false
-            currentChannel = channels.find { it.id == channelId }
         }
     }
 
@@ -133,13 +145,13 @@ fun ChatScreen(
         
         scope.launch {
             isLoadingMore = true
-            chatService.getMessages(channelId, offset = messages.size).onSuccess { 
+            chatService.getMessages(channelId, systemId, offset = messages.size).onSuccess { 
                 if (it.isEmpty()) {
                     hasMoreMessages = false
                 } else {
                     val combined = sortMessages(messages + it)
                     messages = combined
-                    offlineManager.cacheChatMessages(channelId, combined)
+                    offlineManager.cacheChatMessages(channelId, combined, systemId)
                     hasMoreMessages = it.size >= 50
                 }
             }.onFailure {
@@ -177,12 +189,26 @@ fun ChatScreen(
             messageText = ""
             
             scope.launch {
-                chatService.sendMessage(channelId, sender.id, content).onSuccess { newMessage ->
+                chatService.sendMessage(channelId, sender.id, content, systemId).onSuccess { newMessage ->
                     messages = sortMessages(messages.map { if (it.id == tempId) newMessage else it })
-                    offlineManager.cacheChatMessages(channelId, messages)
-                    chatService.getLastKnownSenders(channelId).onSuccess { lastSenders = it }
-                }.onFailure {
-                    messages = messages.map { if (it.id == tempId) it.copy(isPending = false, isFailed = true) else it }
+                    offlineManager.cacheChatMessages(channelId, messages, systemId)
+                    chatService.getLastKnownSenders(channelId, systemId).onSuccess { lastSenders = it }
+                }.onFailure { error ->
+                    val isNetworkError = error.message?.let { msg ->
+                        msg.contains("Failed to connect") || 
+                        msg.contains("Connection refused") || 
+                        msg.contains("No route") ||
+                        msg.contains("Network") ||
+                        msg.contains("timeout") ||
+                        error.cause?.toString()?.contains("IOException") == true
+                    } ?: false
+                    
+                    if (isNetworkError) {
+                        offlineManager.enqueueChatMessage(ChatMessageQueueType.SEND, channelId, content, sender.id, null, systemId)
+                        messages = messages.map { if (it.id == tempId) it.copy(isPending = true, isFailed = false) else it }
+                    } else {
+                        messages = messages.map { if (it.id == tempId) it.copy(isPending = false, isFailed = true) else it }
+                    }
                 }
             }
         }
@@ -192,45 +218,60 @@ fun ChatScreen(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                Spacer(Modifier.height(12.dp))
-                
-                TabRow(selectedTabIndex = drawerTab) {
-                    Tab(
-                        selected = drawerTab == 0,
-                        onClick = { drawerTab = 0 },
-                        text = { Text(i18n.text(MessageKey.ChatTabChannels)) },
-                        icon = { Icon(Icons.AutoMirrored.Filled.Chat, null) }
-                    )
-                    Tab(
-                        selected = drawerTab == 1,
-                        onClick = { drawerTab = 1 },
-                        text = { Text(i18n.text(MessageKey.ChatTabMainMenu)) },
-                        icon = { Icon(Icons.Default.Menu, null) }
-                    )
-                }
+                val userMe by offlineManager.cachedUserMe.collectAsState(authService.userMe.value)
+                val systems by offlineManager.cachedSystems.collectAsState(emptyList())
 
-                if (drawerTab == 0) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(i18n.text(MessageKey.ChatTitle), style = MaterialTheme.typography.titleMedium)
-                        IconButton(onClick = { showChannelCreateDialog = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Create Channel")
-                        }
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    SystemSwitcher(
+                        userMe = userMe,
+                        systems = systems,
+                        currentSystemId = systemId,
+                        systemContextManager = systemContextManager,
+                        navState = navState,
+                        i18n = i18n,
+                        authService = authService,
+                        onCloseDrawer = { scope.launch { drawerState.close() } }
+                    )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    TabRow(selectedTabIndex = drawerTab) {
+                        Tab(
+                            selected = drawerTab == 0,
+                            onClick = { drawerTab = 0 },
+                            text = { Text(i18n.text(MessageKey.ChatTabChannels)) },
+                            icon = { Icon(Icons.AutoMirrored.Filled.Chat, null) }
+                        )
+                        Tab(
+                            selected = drawerTab == 1,
+                            onClick = { drawerTab = 1 },
+                            text = { Text(i18n.text(MessageKey.ChatTabMainMenu)) },
+                            icon = { Icon(Icons.Default.Menu, null) }
+                        )
                     }
-                    HorizontalDivider()
-                    LazyColumn {
-                        items(channels) { channel ->
+
+                    if (drawerTab == 0) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(i18n.text(MessageKey.ChatTitle), style = MaterialTheme.typography.titleMedium)
+                            IconButton(onClick = { showChannelCreateDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Create Channel")
+                            }
+                        }
+                        HorizontalDivider()
+                        // Use a Column here instead of LazyColumn since the parent is scrollable
+                        channels.forEach { channel ->
                             val isSelected = channel.id == channelId
                             NavigationDrawerItem(
-                                label = { 
+                                label = {
                                     Column {
                                         Text(channel.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
                                         if (!channel.description.isNullOrBlank()) {
                                             Text(
-                                                channel.description, 
+                                                channel.description,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -240,41 +281,47 @@ fun ChatScreen(
                                 },
                                 selected = isSelected,
                                 onClick = {
-                                    onNavigate(Route.ChatChannel(channel.id))
+                                    onNavigate(Route.ChatChannel(channel.id, systemId))
                                     scope.launch { drawerState.close() }
                                 },
                                 icon = { Icon(Icons.Default.Tag, null) },
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                         }
-                    }
-                } else {
-                    val userMe by offlineManager.cachedUserMe.collectAsState(authService.userMe.value)
-                    val isSystem = userMe?.isSystem == true
-                    
-                    Spacer(Modifier.height(16.dp))
-                    
-                    Route.all.filter { route ->
-                        if (!isSystem) {
-                            route != Route.System && route != Route.MembersManage
-                        } else true
-                    }.forEach { route ->
-                        val isSelected = when(route) {
-                            Route.Chat -> channelId == null
-                            is Route.ChatChannel -> false
-                            else -> false // AppRouter handles highlighting usually, but here we are in a special case
+                    } else {
+                        val isSystem = userMe?.isSystem == true
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Route.all.filter { route ->
+                            if (!isSystem) {
+                                route !is Route.System && route !is Route.MembersManage
+                            } else true
+                        }.forEach { route ->
+                            val isSelected = when (route) {
+                                is Route.System -> navState.currentRoute is Route.System
+                                is Route.Chat -> navState.currentRoute is Route.Chat || navState.currentRoute is Route.ChatChannel
+                                is Route.MembersManage -> navState.currentRoute is Route.MembersManage || navState.currentRoute is Route.MemberEdit
+                                else -> navState.currentRoute == route
+                            }
+
+                            NavigationDrawerItem(
+                                label = { Text(i18n.text(route.titleKey)) },
+                                selected = isSelected,
+                                onClick = {
+                                    val targetRoute = when (route) {
+                                        is Route.System -> Route.System(systemId)
+                                        is Route.Chat -> Route.Chat(systemId)
+                                        is Route.MembersManage -> Route.MembersManage(systemId)
+                                        else -> route
+                                    }
+                                    onNavigate(targetRoute)
+                                    scope.launch { drawerState.close() }
+                                },
+                                icon = { Icon(route.icon, contentDescription = null) },
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                            )
                         }
-                        
-                        NavigationDrawerItem(
-                            label = { Text(i18n.text(route.titleKey)) },
-                            selected = isSelected,
-                            onClick = {
-                                onNavigate(route)
-                                scope.launch { drawerState.close() }
-                            },
-                            icon = { Icon(route.icon, contentDescription = null) },
-                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                        )
                     }
                 }
             }
@@ -287,7 +334,7 @@ fun ChatScreen(
                     TopAppBar(
                         title = { Text(i18n.text(MessageKey.ChatTitle)) },
                         navigationIcon = {
-                            IconButton(onClick = onOpenDrawer) {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                 Icon(Icons.Default.Menu, contentDescription = "Open Channels")
                             }
                         },
@@ -296,14 +343,16 @@ fun ChatScreen(
                 } else {
                     TopAppBar(
                         navigationIcon = {
-                            IconButton(onClick = onOpenDrawer) {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                 Icon(Icons.Default.Menu, contentDescription = "Open Channels")
                             }
                         },
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { onNavigate(Route.Chat) }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Chat")
+                                if (channelId != null) {
+                                    IconButton(onClick = { onNavigate(Route.Chat(systemId)) }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Chat")
+                                    }
                                 }
                                 Icon(Icons.Default.Tag, null, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
@@ -383,9 +432,26 @@ fun ChatScreen(
                                             onEdit = { editingMessage = it },
                                             onDelete = { messageToConfirmDelete = it },
                                             onRetry = { retryMsg ->
-                                                messages = messages.filter { it.id != retryMsg.id }
-                                                messageText = retryMsg.content
-                                                sendMessage()
+                                                if (retryMsg.isEditFailed) {
+                                                    // Retry edit
+                                                    val editMsg = retryMsg.copy(isPendingEdit = true, isEditFailed = false)
+                                                    messages = sortMessages(messages.map { if (it.id == retryMsg.id) editMsg else it })
+                                                    offlineManager.cacheChatMessages(retryMsg.channelId, messages, systemId)
+                                                    
+                                                    scope.launch {
+                                                        chatService.editMessage(retryMsg.channelId, retryMsg.id, retryMsg.content, systemId).onSuccess { updated ->
+                                                            messages = sortMessages(messages.map { if (it.id == updated.id) updated.copy(isEdited = true) else it })
+                                                            offlineManager.cacheChatMessages(retryMsg.channelId, messages, systemId)
+                                                        }.onFailure {
+                                                            messages = messages.map { if (it.id == retryMsg.id) editMsg.copy(isPendingEdit = false, isEditFailed = true) else it }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // Retry send
+                                                    messages = messages.filter { it.id != retryMsg.id }
+                                                    messageText = retryMsg.content
+                                                    sendMessage()
+                                                }
                                             }
                                         )
                                         if (showSenderInfo && index < messages.size - 1) {
@@ -575,9 +641,9 @@ fun ChatScreen(
                 TextButton(onClick = {
                     if (newChannelName.isNotBlank()) {
                         scope.launch {
-                            chatService.createChannel(newChannelName).onSuccess { newChannel ->
-                                channels = channels + newChannel
-                                onNavigate(Route.ChatChannel(newChannel.id))
+                            chatService.createChannel(newChannelName, systemId).onSuccess { newChannel ->
+                                offlineManager.cacheChatChannels(channels + newChannel, systemId)
+                                onNavigate(Route.ChatChannel(newChannel.id, systemId))
                                 showChannelCreateDialog = false
                                 newChannelName = ""
                             }
@@ -610,12 +676,40 @@ fun ChatScreen(
             confirmButton = {
                 TextButton(onClick = {
                     val msg = editingMessage!!
-                    scope.launch {
-                        chatService.editMessage(msg.channelId, msg.id, text).onSuccess { updated ->
-                            messages = sortMessages(messages.map { if (it.id == updated.id) updated else it })
-                            offlineManager.cacheChatMessages(msg.channelId, messages)
-                            editingMessage = null
+                    if (text != msg.content) {
+                        val updatedMessage = msg.copy(
+                            content = text,
+                            isPendingEdit = true,
+                            isEditFailed = false
+                        )
+                        messages = sortMessages(messages.map { if (it.id == msg.id) updatedMessage else it })
+                        offlineManager.cacheChatMessages(msg.channelId, messages, systemId)
+                        editingMessage = null
+                        
+                        scope.launch {
+                            chatService.editMessage(msg.channelId, msg.id, text, systemId).onSuccess { updated ->
+                                messages = sortMessages(messages.map { if (it.id == updated.id) updated.copy(isEdited = true) else it })
+                                offlineManager.cacheChatMessages(msg.channelId, messages, systemId)
+                            }.onFailure { error ->
+                                val isNetworkError = error.message?.let { errMsg ->
+                                    errMsg.contains("Failed to connect") || 
+                                    errMsg.contains("Connection refused") || 
+                                    errMsg.contains("No route") ||
+                                    errMsg.contains("Network") ||
+                                    errMsg.contains("timeout") ||
+                                    error.cause?.toString()?.contains("IOException") == true
+                                } ?: false
+                                
+                                if (isNetworkError) {
+                                    offlineManager.enqueueChatMessage(ChatMessageQueueType.EDIT, msg.channelId, text, msg.senderId, msg.id, systemId)
+                                    messages = messages.map { if (it.id == msg.id) updatedMessage.copy(isPendingEdit = true, isEditFailed = false) else it }
+                                } else {
+                                    messages = messages.map { if (it.id == msg.id) updatedMessage.copy(isPendingEdit = false, isEditFailed = true) else it }
+                                }
+                            }
                         }
+                    } else {
+                        editingMessage = null
                     }
                 }) {
                     Text(i18n.text(MessageKey.CommonSave))
@@ -655,9 +749,9 @@ fun ChatScreen(
                         if (deleteTapCount >= 3) {
                             val msg = messageToConfirmDelete!!
                             scope.launch {
-                                chatService.deleteMessage(msg.channelId, msg.id).onSuccess {
+                                chatService.deleteMessage(msg.channelId, msg.id, systemId).onSuccess {
                                     messages = messages.filter { it.id != msg.id }
-                                    offlineManager.cacheChatMessages(msg.channelId, messages)
+                                    offlineManager.cacheChatMessages(msg.channelId, messages, systemId)
                                     messageToConfirmDelete = null
                                     deleteTapCount = 0
                                 }
@@ -708,10 +802,9 @@ fun ChatScreen(
                         if (deleteTapCount >= 3) {
                             val channelId = channelToConfirmDelete!!.id
                             scope.launch {
-                                chatService.deleteChannel(channelId).onSuccess {
-                                    channels = channels.filter { it.id != channelId }
-                                    offlineManager.cacheChatChannels(channels)
-                                    onNavigate(Route.Chat)
+                                chatService.deleteChannel(channelId, systemId).onSuccess {
+                                    offlineManager.cacheChatChannels(channels.filter { it.id != channelId }, systemId)
+                                    onNavigate(Route.Chat(systemId))
                                     channelToConfirmDelete = null
                                     deleteTapCount = 0
                                 }
@@ -809,12 +902,23 @@ fun ChatMessageItem(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
+                    if (message.isEdited || message.isPendingEdit) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (message.isPendingEdit) "Editing..." else "Edited",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (message.isEditFailed) MaterialTheme.colorScheme.error 
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            fontWeight = if (message.isEditFailed) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
                 }
             }
             
             Surface(
                 color = if (message.isFailed) MaterialTheme.colorScheme.errorContainer 
-                        else if (message.isPending) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        else if (message.isEditFailed) MaterialTheme.colorScheme.errorContainer
+                        else if (message.isPending || message.isPendingEdit) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         else MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(
                     topStart = if (showSenderInfo) 0.dp else 12.dp,
@@ -825,9 +929,13 @@ fun ChatMessageItem(
             ) {
                 Column(Modifier.padding(8.dp)) {
                     Text(message.content)
-                    if (message.isFailed) {
+                    if (message.isFailed || message.isEditFailed) {
                         TextButton(onClick = { onRetry(message) }) {
-                            Text("Retry", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                if (message.isEditFailed) "Retry Edit" else "Retry",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                     }
                 }

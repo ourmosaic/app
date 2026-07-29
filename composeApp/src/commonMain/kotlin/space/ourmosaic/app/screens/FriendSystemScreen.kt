@@ -38,6 +38,7 @@ fun FriendSystemScreen(
     friendId: String,
     initialPage: Int = 0,
     i18n: I18nState,
+    currentSystemId: String?,
     onBack: () -> Unit,
     onNavigate: (Route) -> Unit,
     onTabChange: (Int) -> Unit,
@@ -46,6 +47,7 @@ fun FriendSystemScreen(
 ) {
     var friendSystem by remember { mutableStateOf<FriendSystemView?>(null) }
     var allMembers by remember { mutableStateOf<List<MemberResponse>>(emptyList()) }
+    var friendFrontSessions by remember { mutableStateOf<List<FriendFrontSessionResponse>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var showPermissionsDialog by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 2 })
@@ -64,7 +66,7 @@ fun FriendSystemScreen(
 
     suspend fun loadData() {
         isLoading = true
-        systemService.getFriendSystem(friendId).onSuccess {
+        systemService.getFriendSystem(friendId, currentSystemId).onSuccess {
             friendSystem = it
             allMembers = it.members
         }.onFailure {
@@ -73,15 +75,19 @@ fun FriendSystemScreen(
             snackbarHostState.showSnackbar("Failed to load friend system: ${it.message}")
         }
         
+        systemService.getFriendFrontSessions(friendId).onSuccess {
+            friendFrontSessions = it
+        }
+
         // Try to load full member list from specific endpoint if available/needed
-        systemService.getFriendMembers(friendId).onSuccess {
+        systemService.getFriendMembers(friendId, currentSystemId).onSuccess {
             allMembers = it
         }
         
         isLoading = false
     }
 
-    LaunchedEffect(friendId) {
+    LaunchedEffect(friendId, currentSystemId) {
         loadData()
     }
 
@@ -199,7 +205,20 @@ fun FriendSystemScreen(
                                     SharingStatusCard(system.permissions, i18n)
                                 }
 
-                                if (system.activeFrontSessions.isNotEmpty()) {
+                                if (friendFrontSessions.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            i18n.text(MessageKey.FrontActive),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    items(friendFrontSessions) { session ->
+                                        FriendFrontSessionListItem(session, authService, i18n) {
+                                            onNavigate(Route.FriendMemberDetail(friendId, session.member.id))
+                                        }
+                                    }
+                                } else if (system.activeFrontSessions.isNotEmpty()) {
                                     item {
                                         Text(
                                         i18n.text(MessageKey.FrontActive),
@@ -210,6 +229,22 @@ fun FriendSystemScreen(
                                     items(system.activeFrontSessions) { session ->
                                         ActiveFrontListItem(session, authService, i18n) {
                                             onNavigate(Route.FriendMemberDetail(friendId, session.member.id))
+                                        }
+                                    }
+                                }
+
+                                if (system.subsystems.isNotEmpty()) {
+                                    item {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "Subsystems",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    items(system.subsystems) { subsystem ->
+                                        SubsystemListItem(subsystem, authService) {
+                                            onNavigate(Route.FriendSystem(friendId, currentSystemId = subsystem.id))
                                         }
                                     }
                                 }
@@ -383,12 +418,7 @@ fun SystemHeader(system: FriendSystemView, authService: AuthService) {
 @Composable
 fun ActiveFrontListItem(session: ActiveFrontSession, authService: AuthService, i18n: I18nState, onClick: () -> Unit) {
     val displayTime = remember(session.startTime) {
-        try {
-            // "2024-05-24T18:18:18Z" -> "18:18"
-            session.startTime.split("T").lastOrNull()?.take(5) ?: session.startTime
-        } catch (e: Exception) {
-            session.startTime
-        }
+        formatStartTime(session.startTime)
     }
 
     FriendMemberItem(
@@ -399,6 +429,66 @@ fun ActiveFrontListItem(session: ActiveFrontSession, authService: AuthService, i
         supportingText = i18n.text(MessageKey.MemberSince, displayTime),
         onClick = onClick
     )
+}
+
+@Composable
+fun FriendFrontSessionListItem(session: FriendFrontSessionResponse, authService: AuthService, i18n: I18nState, onClick: () -> Unit) {
+    val displayTime = remember(session.startTime) {
+        formatStartTime(session.startTime)
+    }
+
+    FriendMemberItem(
+        member = session.member,
+        authService = authService,
+        i18n = i18n,
+        isFronting = true,
+        supportingText = "${session.systemName} • " + i18n.text(MessageKey.MemberSince, displayTime),
+        onClick = onClick
+    )
+}
+
+private fun formatStartTime(startTime: String): String {
+    return try {
+        // "2024-05-24T18:18:18Z" -> "18:18"
+        startTime.split("T").lastOrNull()?.take(5) ?: startTime
+    } catch (e: Exception) {
+        startTime
+    }
+}
+
+@Composable
+fun SubsystemListItem(subsystem: FriendSystemView, authService: AuthService, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MosaicAvatar(
+                avatarUrl = subsystem.avatarUrl,
+                size = 40.dp,
+                cornerRadius = 20.dp,
+                authService = authService
+            )
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = subsystem.customName ?: "Unnamed Subsystem",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                if (subsystem.activeFrontSessions.isNotEmpty()) {
+                    Text(
+                        text = "${subsystem.activeFrontSessions.size} members fronting",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

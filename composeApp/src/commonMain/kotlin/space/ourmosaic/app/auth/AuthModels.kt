@@ -40,5 +40,6 @@ data class UserMeResponse(
     val isFederated: Boolean = false,
     val domain: String? = null,
     val isSystem: Boolean,
-    val system: SystemResponse? = null
+    val system: SystemResponse? = null,
+    val systems: List<SystemResponse> = emptyList()
 )

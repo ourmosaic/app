@@ -31,8 +31,30 @@ enum class PendingActionType(val idPrefix: String) {
     SYNC_FRONT_SESSIONS("sync_front"),
     CREATE_CUSTOM_FIELD("crt_cf"),
     UPDATE_CUSTOM_FIELD("upd_cf"),
-    DELETE_CUSTOM_FIELD("del_cf")
+    DELETE_CUSTOM_FIELD("del_cf"),
+    CREATE_SYSTEM("crt_sys"),
+    TRANSFER_MEMBER("trf_mem"),
+    SEND_CHAT_MESSAGE("send_msg"),
+    EDIT_CHAT_MESSAGE("edit_msg")
 }
+
+@Serializable
+enum class ChatMessageQueueType {
+    SEND, EDIT
+}
+
+@Serializable
+data class PendingChatMessage(
+    val id: String,
+    val type: ChatMessageQueueType,
+    val channelId: String,
+    val messageId: String?,
+    val content: String,
+    val senderId: String,
+    val systemId: String? = null,
+    val timestamp: Long = 0L,
+    val retryCount: Int = 0
+)
 
 @Serializable
 data class PendingAction(
@@ -41,6 +63,7 @@ data class PendingAction(
     val memberId: String? = null,
     val fieldId: String? = null,
     val sessionId: String? = null,
+    val systemId: String? = null,
     val jsonPayload: String,
     val timestamp: Long = 0L
 )
@@ -58,20 +81,22 @@ class OfflineManager(private val settings: Settings = Settings()) {
     
     private val ACTIONS_KEY = "offline_pending_actions"
     private val ERRORS_KEY = "offline_sync_errors"
-    private val FIELDS_CACHE_KEY = "cached_custom_fields"
-    private val MEMBERS_CACHE_KEY = "cached_members"
-    private val GROUPS_CACHE_KEY = "cached_groups"
-    private val FRONT_SESSIONS_CACHE_KEY = "cached_front_sessions"
+    private val CHAT_MESSAGES_QUEUE_KEY = "chat_messages_queue"
+    private fun FIELDS_CACHE_KEY(systemId: String?) = if (systemId == null) "cached_custom_fields" else "cached_custom_fields_$systemId"
+    private fun MEMBERS_CACHE_KEY(systemId: String?) = if (systemId == null) "cached_members" else "cached_members_$systemId"
+    private fun GROUPS_CACHE_KEY(systemId: String?) = if (systemId == null) "cached_groups" else "cached_groups_$systemId"
+    private fun FRONT_SESSIONS_CACHE_KEY(systemId: String?) = if (systemId == null) "cached_front_sessions" else "cached_front_sessions_$systemId"
     private val ID_MAPPING_KEY = "id_mapping"
     private val USER_ME_CACHE_KEY = "cached_user_me"
+    private val SYSTEMS_CACHE_KEY = "cached_systems"
     private val FRIENDS_CACHE_KEY = "cached_friends"
     private val SENT_REQUESTS_CACHE_KEY = "cached_sent_requests"
     private val RECEIVED_REQUESTS_CACHE_KEY = "cached_received_requests"
     private val BLOCKED_USERS_CACHE_KEY = "cached_blocked_users"
     private val BLOCKED_MEMBERS_CACHE_KEY = "cached_blocked_members"
     private val BLOCKED_SYSTEMS_CACHE_KEY = "cached_blocked_systems"
-    private val CHAT_CHANNELS_CACHE_KEY = "cached_chat_channels"
-    private val CHAT_MESSAGES_CACHE_PREFIX = "cached_chat_messages_"
+    private fun CHAT_CHANNELS_CACHE_KEY(systemId: String?) = if (systemId == null) "cached_chat_channels" else "cached_chat_channels_$systemId"
+    private fun CHAT_MESSAGES_CACHE_PREFIX(systemId: String?) = if (systemId == null) "cached_chat_messages_" else "cached_chat_messages_${systemId}_"
 
     private val _pendingActions = MutableStateFlow(getPendingActions())
     private val _pendingActionsCount = MutableStateFlow(_pendingActions.value.size)
@@ -115,6 +140,28 @@ class OfflineManager(private val settings: Settings = Settings()) {
     val cachedReceivedRequests: Flow<List<space.ourmosaic.app.system.FriendRequestResponse>> = _serverReceivedRequests
         .map { it ?: getCachedReceivedRequests() ?: emptyList() }
         .distinctUntilChanged()
+
+    private val _systems = MutableStateFlow<List<space.ourmosaic.app.system.SystemResponse>?>(null)
+    val cachedSystems: Flow<List<space.ourmosaic.app.system.SystemResponse>> = combine(_systems, _pendingActions) { serverSystems, actions ->
+        val baseSystems = serverSystems ?: getCachedSystems() ?: emptyList()
+        val result = baseSystems.toMutableList()
+
+        actions.filter { it.type == PendingActionType.CREATE_SYSTEM }.forEach { action ->
+            try {
+                val dto = json.decodeFromString(space.ourmosaic.app.system.CreateSystemOrSubSystemDto.serializer(), action.jsonPayload)
+                if (result.none { it.id == action.id }) {
+                    result.add(space.ourmosaic.app.system.SystemResponse(
+                        id = action.id,
+                        customName = dto.customName,
+                        description = dto.description,
+                        parentSystemId = dto.parent,
+                        userId = settings.getStringOrNull("user_id") ?: ""
+                    ))
+                }
+            } catch (e: Exception) {}
+        }
+        result.toList()
+    }.distinctUntilChanged()
 
     private val _serverFrontSessions = MutableStateFlow<List<FrontSession>?>(null)
     val cachedFrontSessions: Flow<List<FrontSession>?> = combine(_serverFrontSessions, _pendingActions, _idMappings) { serverSessions, actions, mappings ->
@@ -513,6 +560,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
         _serverFriends.value = getCachedFriends()
         _serverSentRequests.value = getCachedSentRequests()
         _serverReceivedRequests.value = getCachedReceivedRequests()
+        _systems.value = getCachedSystems()
     }
 
     fun triggerSync() {
@@ -553,6 +601,13 @@ class OfflineManager(private val settings: Settings = Settings()) {
         _syncErrors.value = current
     }
 
+    fun resetMemoryCache() {
+        _serverMembers.value = null
+        _serverGroups.value = null
+        _serverFrontSessions.value = null
+        _serverCustomFields.value = null
+    }
+
     fun dismissSyncError(errorId: String) {
         val current = getSyncErrors().filter { it.id != errorId }
         saveSyncErrors(current)
@@ -584,13 +639,13 @@ class OfflineManager(private val settings: Settings = Settings()) {
         settings[ACTIONS_KEY] = json.encodeToString(ListSerializer(PendingAction.serializer()), actions)
     }
 
-    fun cacheCustomFields(fields: List<CustomField>) {
-        settings[FIELDS_CACHE_KEY] = json.encodeToString(ListSerializer(CustomField.serializer()), fields)
+    fun cacheCustomFields(fields: List<CustomField>, systemId: String? = null) {
+        settings[FIELDS_CACHE_KEY(systemId)] = json.encodeToString(ListSerializer(CustomField.serializer()), fields)
         _serverCustomFields.value = fields
     }
 
-    fun getCachedCustomFields(): List<CustomField>? {
-        val raw = settings.getStringOrNull(FIELDS_CACHE_KEY) ?: return null
+    fun getCachedCustomFields(systemId: String? = null): List<CustomField>? {
+        val raw = settings.getStringOrNull(FIELDS_CACHE_KEY(systemId)) ?: return null
         return try {
             json.decodeFromString(ListSerializer(CustomField.serializer()), raw)
         } catch (e: Exception) {
@@ -598,8 +653,8 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun cacheMembers(members: List<MemberResponse>) {
-        settings[MEMBERS_CACHE_KEY] = json.encodeToString(ListSerializer(MemberResponse.serializer()), members)
+    fun cacheMembers(members: List<MemberResponse>, systemId: String? = null) {
+        settings[MEMBERS_CACHE_KEY(systemId)] = json.encodeToString(ListSerializer(MemberResponse.serializer()), members)
         _serverMembers.value = members
     }
 
@@ -621,8 +676,8 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun getCachedMembers(): List<MemberResponse>? {
-        val raw = settings.getStringOrNull(MEMBERS_CACHE_KEY) ?: return null
+    fun getCachedMembers(systemId: String? = null): List<MemberResponse>? {
+        val raw = settings.getStringOrNull(MEMBERS_CACHE_KEY(systemId)) ?: return null
         return try {
             json.decodeFromString(ListSerializer(MemberResponse.serializer()), raw)
         } catch (e: Exception) {
@@ -630,15 +685,29 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun cacheGroups(groups: List<space.ourmosaic.app.system.MemberGroup>) {
-        settings[GROUPS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.MemberGroup.serializer()), groups)
+    fun cacheGroups(groups: List<space.ourmosaic.app.system.MemberGroup>, systemId: String? = null) {
+        settings[GROUPS_CACHE_KEY(systemId)] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.MemberGroup.serializer()), groups)
         _serverGroups.value = groups
     }
 
-    fun getCachedGroups(): List<space.ourmosaic.app.system.MemberGroup>? {
-        val raw = settings.getStringOrNull(GROUPS_CACHE_KEY) ?: return null
+    fun getCachedGroups(systemId: String? = null): List<space.ourmosaic.app.system.MemberGroup>? {
+        val raw = settings.getStringOrNull(GROUPS_CACHE_KEY(systemId)) ?: return null
         return try {
             json.decodeFromString(ListSerializer(space.ourmosaic.app.system.MemberGroup.serializer()), raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun cacheSystems(systems: List<space.ourmosaic.app.system.SystemResponse>) {
+        settings[SYSTEMS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.SystemResponse.serializer()), systems)
+        _systems.value = systems
+    }
+
+    fun getCachedSystems(): List<space.ourmosaic.app.system.SystemResponse>? {
+        val raw = settings.getStringOrNull(SYSTEMS_CACHE_KEY) ?: return null
+        return try {
+            json.decodeFromString(ListSerializer(space.ourmosaic.app.system.SystemResponse.serializer()), raw)
         } catch (e: Exception) {
             null
         }
@@ -728,8 +797,8 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun cacheFrontSessions(sessions: List<FrontSession>, markOthersAsEnded: Boolean = false) {
-        val current = getCachedFrontSessions() ?: emptyList()
+    fun cacheFrontSessions(sessions: List<FrontSession>, markOthersAsEnded: Boolean = false, systemId: String? = null) {
+        val current = getCachedFrontSessions(systemId) ?: emptyList()
         val mappings = getIdMappings()
         
         // Merge strategy: prioritize ended sessions and server IDs.
@@ -768,16 +837,24 @@ class OfflineManager(private val settings: Settings = Settings()) {
             }
         }
 
-        settings[FRONT_SESSIONS_CACHE_KEY] = json.encodeToString(ListSerializer(FrontSession.serializer()), merged)
+        settings[FRONT_SESSIONS_CACHE_KEY(systemId)] = json.encodeToString(ListSerializer(FrontSession.serializer()), merged)
         _serverFrontSessions.value = merged
     }
 
-    fun cacheChatChannels(channels: List<space.ourmosaic.app.system.ChatChannelResponse>) {
-        settings[CHAT_CHANNELS_CACHE_KEY] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatChannelResponse.serializer()), channels)
+    private val _chatChannels = MutableStateFlow<Map<String?, List<space.ourmosaic.app.system.ChatChannelResponse>>>(emptyMap())
+    fun cachedChatChannels(systemId: String?): Flow<List<space.ourmosaic.app.system.ChatChannelResponse>> = _chatChannels
+        .map { it[systemId] ?: getCachedChatChannels(systemId) ?: emptyList() }
+        .distinctUntilChanged()
+
+    fun cacheChatChannels(channels: List<space.ourmosaic.app.system.ChatChannelResponse>, systemId: String? = null) {
+        settings[CHAT_CHANNELS_CACHE_KEY(systemId)] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatChannelResponse.serializer()), channels)
+        val current = _chatChannels.value.toMutableMap()
+        current[systemId] = channels
+        _chatChannels.value = current
     }
 
-    fun getCachedChatChannels(): List<space.ourmosaic.app.system.ChatChannelResponse>? {
-        val raw = settings.getStringOrNull(CHAT_CHANNELS_CACHE_KEY) ?: return null
+    fun getCachedChatChannels(systemId: String? = null): List<space.ourmosaic.app.system.ChatChannelResponse>? {
+        val raw = settings.getStringOrNull(CHAT_CHANNELS_CACHE_KEY(systemId)) ?: return null
         return try {
             json.decodeFromString(ListSerializer(space.ourmosaic.app.system.ChatChannelResponse.serializer()), raw)
         } catch (e: Exception) {
@@ -785,12 +862,13 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun cacheChatMessages(channelId: String, messages: List<space.ourmosaic.app.system.ChatMessageResponse>) {
-        settings[CHAT_MESSAGES_CACHE_PREFIX + channelId] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatMessageResponse.serializer()), messages)
+    fun cacheChatMessages(channelId: String, messages: List<space.ourmosaic.app.system.ChatMessageResponse>, systemId: String? = null, limit: Int = 50) {
+        val limitedMessages = if (messages.size > limit) messages.take(limit) else messages
+        settings[CHAT_MESSAGES_CACHE_PREFIX(systemId) + channelId] = json.encodeToString(ListSerializer(space.ourmosaic.app.system.ChatMessageResponse.serializer()), limitedMessages)
     }
 
-    fun getCachedChatMessages(channelId: String): List<space.ourmosaic.app.system.ChatMessageResponse>? {
-        val raw = settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX + channelId) ?: return null
+    fun getCachedChatMessages(channelId: String, systemId: String? = null): List<space.ourmosaic.app.system.ChatMessageResponse>? {
+        val raw = settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX(systemId) + channelId) ?: return null
         return try {
             json.decodeFromString(ListSerializer(space.ourmosaic.app.system.ChatMessageResponse.serializer()), raw)
         } catch (e: Exception) {
@@ -798,36 +876,57 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun getTotalMessagesCount(): Int {
-        val channels = getCachedChatChannels() ?: return 0
-        return channels.sumOf { getCachedChatMessages(it.id)?.size ?: 0 }
+    fun getTotalMessagesCount(systemId: String? = null): Int {
+        val channels = getCachedChatChannels(systemId) ?: return 0
+        return channels.sumOf { getCachedChatMessages(it.id, systemId)?.size ?: 0 }
     }
 
-    fun getEstimatedCacheSize(): Long {
+    fun getEstimatedCacheSize(systemId: String? = null): Long {
+        return if (systemId == null) getGlobalCacheSize() else getSystemCacheSize(systemId)
+    }
+
+    fun getGlobalCacheSize(): Long {
         var totalSize = 0L
         val keys = listOf(
-            ACTIONS_KEY, ERRORS_KEY, FIELDS_CACHE_KEY, MEMBERS_CACHE_KEY,
-            GROUPS_CACHE_KEY, FRONT_SESSIONS_CACHE_KEY, ID_MAPPING_KEY,
-            USER_ME_CACHE_KEY, FRIENDS_CACHE_KEY, SENT_REQUESTS_CACHE_KEY,
-            RECEIVED_REQUESTS_CACHE_KEY, BLOCKED_USERS_CACHE_KEY,
-            BLOCKED_MEMBERS_CACHE_KEY, BLOCKED_SYSTEMS_CACHE_KEY,
-            CHAT_CHANNELS_CACHE_KEY
+            ACTIONS_KEY, ERRORS_KEY, ID_MAPPING_KEY, USER_ME_CACHE_KEY, SYSTEMS_CACHE_KEY,
+            FRIENDS_CACHE_KEY, SENT_REQUESTS_CACHE_KEY, RECEIVED_REQUESTS_CACHE_KEY,
+            BLOCKED_USERS_CACHE_KEY, BLOCKED_MEMBERS_CACHE_KEY, BLOCKED_SYSTEMS_CACHE_KEY
         )
-        
+        for (key in keys) {
+            totalSize += settings.getStringOrNull(key)?.length?.toLong() ?: 0L
+        }
+        return totalSize
+    }
+
+    fun getSystemCacheSize(systemId: String): Long {
+        var totalSize = 0L
+        val keys = listOf(
+            FIELDS_CACHE_KEY(systemId), MEMBERS_CACHE_KEY(systemId),
+            GROUPS_CACHE_KEY(systemId), FRONT_SESSIONS_CACHE_KEY(systemId),
+            CHAT_CHANNELS_CACHE_KEY(systemId)
+        )
         for (key in keys) {
             totalSize += settings.getStringOrNull(key)?.length?.toLong() ?: 0L
         }
 
         // Add chat messages
-        getCachedChatChannels()?.forEach { channel ->
-            totalSize += settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX + channel.id)?.length?.toLong() ?: 0L
+        getCachedChatChannels(systemId)?.forEach { channel ->
+            totalSize += settings.getStringOrNull(CHAT_MESSAGES_CACHE_PREFIX(systemId) + channel.id)?.length?.toLong() ?: 0L
         }
 
         return totalSize
     }
 
-    fun getCachedFrontSessions(): List<space.ourmosaic.app.system.FrontSession>? {
-        val raw = settings.getStringOrNull(FRONT_SESSIONS_CACHE_KEY) ?: return null
+    fun getTotalCacheSize(): Long {
+        var total = getGlobalCacheSize()
+        getCachedSystems()?.forEach { system ->
+            total += getSystemCacheSize(system.id)
+        }
+        return total
+    }
+
+    fun getCachedFrontSessions(systemId: String? = null): List<space.ourmosaic.app.system.FrontSession>? {
+        val raw = settings.getStringOrNull(FRONT_SESSIONS_CACHE_KEY(systemId)) ?: return null
         return try {
             json.decodeFromString(ListSerializer(space.ourmosaic.app.system.FrontSession.serializer()), raw)
         } catch (e: Exception) {
@@ -865,50 +964,104 @@ class OfflineManager(private val settings: Settings = Settings()) {
         }
     }
 
-    fun clearAllData() {
+    fun clearSystemData(systemId: String) {
+        settings.remove(FIELDS_CACHE_KEY(systemId))
+        settings.remove(MEMBERS_CACHE_KEY(systemId))
+        settings.remove(GROUPS_CACHE_KEY(systemId))
+        settings.remove(FRONT_SESSIONS_CACHE_KEY(systemId))
+        settings.remove(CHAT_CHANNELS_CACHE_KEY(systemId))
+        
+        getCachedChatChannels(systemId)?.forEach { channel ->
+            settings.remove(CHAT_MESSAGES_CACHE_PREFIX(systemId) + channel.id)
+        }
+        
+        // Refresh flows if it's the current system
+        if (settings.getStringOrNull("system_id") == systemId) {
+            _serverMembers.value = null
+            _serverFrontSessions.value = null
+            _serverGroups.value = null
+            _serverCustomFields.value = null
+            val currentChannels = _chatChannels.value.toMutableMap()
+            currentChannels.remove(systemId)
+            _chatChannels.value = currentChannels
+        }
+    }
+
+    fun clearGlobalData() {
         settings.remove(ACTIONS_KEY)
         settings.remove(ERRORS_KEY)
-        settings.remove(FIELDS_CACHE_KEY)
-        settings.remove(MEMBERS_CACHE_KEY)
-        settings.remove(GROUPS_CACHE_KEY)
-        settings.remove(FRONT_SESSIONS_CACHE_KEY)
         settings.remove(ID_MAPPING_KEY)
         settings.remove(USER_ME_CACHE_KEY)
+        settings.remove(SYSTEMS_CACHE_KEY)
         settings.remove(FRIENDS_CACHE_KEY)
         settings.remove(SENT_REQUESTS_CACHE_KEY)
         settings.remove(RECEIVED_REQUESTS_CACHE_KEY)
+        settings.remove(BLOCKED_USERS_CACHE_KEY)
+        settings.remove(BLOCKED_MEMBERS_CACHE_KEY)
+        settings.remove(BLOCKED_SYSTEMS_CACHE_KEY)
         settings.remove("is_importing")
         
         _pendingActions.value = emptyList()
         _pendingActionsCount.value = 0
         _syncErrors.value = emptyList()
-        _serverFrontSessions.value = null
-        _serverMembers.value = null
         _serverUserMe.value = null
-        _serverGroups.value = null
-        _serverCustomFields.value = null
+        _systems.value = null
         _serverFriends.value = null
         _serverSentRequests.value = null
         _serverReceivedRequests.value = null
+        _blockedUsers.value = null
+        _blockedMembers.value = null
+        _blockedSystems.value = null
         _isImporting.value = false
     }
 
-    fun getRawJson(key: String): String? {
+    fun clearEverything() {
+        // Clear global data
+        clearGlobalData()
+        
+        // Clear all systems data (we need to know which systems we have)
+        // Note: we can't easily iterate all keys in Settings, so we rely on what we've cached
+        getCachedSystems()?.forEach { system ->
+            clearSystemData(system.id)
+        }
+        
+        // Final safety: clear the "no-system" data too
+        settings.remove(FIELDS_CACHE_KEY(null))
+        settings.remove(MEMBERS_CACHE_KEY(null))
+        settings.remove(GROUPS_CACHE_KEY(null))
+        settings.remove(FRONT_SESSIONS_CACHE_KEY(null))
+        settings.remove(CHAT_CHANNELS_CACHE_KEY(null))
+    }
+
+    /**
+     * @deprecated Use clearEverything(), clearGlobalData() or clearSystemData(id) instead.
+     */
+    fun clearAllData(systemId: String? = null) {
+        if (systemId != null) {
+            clearSystemData(systemId)
+        } else {
+            clearEverything()
+        }
+    }
+
+    fun getRawJson(key: String, systemId: String? = null): String? {
         val fullKey = when (key) {
-            "members" -> MEMBERS_CACHE_KEY
-            "groups" -> GROUPS_CACHE_KEY
-            "fields" -> FIELDS_CACHE_KEY
-            "sessions" -> FRONT_SESSIONS_CACHE_KEY
+            "members" -> MEMBERS_CACHE_KEY(systemId)
+            "groups" -> GROUPS_CACHE_KEY(systemId)
+            "fields" -> FIELDS_CACHE_KEY(systemId)
+            "sessions" -> FRONT_SESSIONS_CACHE_KEY(systemId)
             "friends" -> FRIENDS_CACHE_KEY
             "sent_requests" -> SENT_REQUESTS_CACHE_KEY
             "received_requests" -> RECEIVED_REQUESTS_CACHE_KEY
             "blocked_users" -> BLOCKED_USERS_CACHE_KEY
             "blocked_members" -> BLOCKED_MEMBERS_CACHE_KEY
             "blocked_systems" -> BLOCKED_SYSTEMS_CACHE_KEY
-            "channels" -> CHAT_CHANNELS_CACHE_KEY
+            "channels" -> CHAT_CHANNELS_CACHE_KEY(systemId)
             "actions" -> ACTIONS_KEY
             "mappings" -> ID_MAPPING_KEY
-            else -> if (key.startsWith("messages_")) CHAT_MESSAGES_CACHE_PREFIX + key.removePrefix("messages_") else null
+            "user_me" -> USER_ME_CACHE_KEY
+            "systems" -> SYSTEMS_CACHE_KEY
+            else -> if (key.startsWith("messages_")) CHAT_MESSAGES_CACHE_PREFIX(systemId) + key.removePrefix("messages_") else null
         }
         return if (fullKey != null) settings.getStringOrNull(fullKey) else null
     }
@@ -917,5 +1070,59 @@ class OfflineManager(private val settings: Settings = Settings()) {
         if (id == null) return null
         // mappings is serverId -> localId
         return mappings.entries.find { it.value == id }?.key ?: id
+    }
+
+    // Chat message queue management
+    private fun getPendingChatMessages(): List<PendingChatMessage> {
+        val raw = settings.getStringOrNull(CHAT_MESSAGES_QUEUE_KEY) ?: return emptyList()
+        return try {
+            json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(PendingChatMessage.serializer()), raw)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun savePendingChatMessages(messages: List<PendingChatMessage>) {
+        settings[CHAT_MESSAGES_QUEUE_KEY] = json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(PendingChatMessage.serializer()),
+            messages
+        )
+    }
+
+    fun enqueueChatMessage(type: ChatMessageQueueType, channelId: String, content: String, senderId: String, messageId: String? = null, systemId: String? = null) {
+        val pending = getPendingChatMessages().toMutableList()
+        val id = "${type.name.lowercase()}_${Clock.System.now().toEpochMilliseconds()}"
+        pending.add(PendingChatMessage(
+            id = id,
+            type = type,
+            channelId = channelId,
+            messageId = messageId,
+            content = content,
+            senderId = senderId,
+            systemId = systemId,
+            timestamp = Clock.System.now().toEpochMilliseconds()
+        ))
+        savePendingChatMessages(pending)
+    }
+
+    fun getPendingMessages(): List<PendingChatMessage> = getPendingChatMessages()
+
+    fun removePendingMessage(id: String) {
+        val pending = getPendingChatMessages().toMutableList()
+        pending.removeAll { it.id == id }
+        savePendingChatMessages(pending)
+    }
+
+    fun updatePendingMessageRetry(id: String) {
+        val pending = getPendingChatMessages().toMutableList()
+        val index = pending.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            pending[index] = pending[index].copy(retryCount = pending[index].retryCount + 1)
+            savePendingChatMessages(pending)
+        }
+    }
+
+    fun clearPendingMessages() {
+        settings.remove(CHAT_MESSAGES_QUEUE_KEY)
     }
 }

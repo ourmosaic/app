@@ -58,13 +58,13 @@ class SyncWorker(
         return result
     }
 
-    suspend fun sync() {
+    suspend fun sync(systemId: String? = null) {
         // We remove the isSyncing check because start() uses collect, 
         // which ensures sequential execution.
         isSyncing = true
         
         try {
-            Logger.d(TAG, "Sync loop started")
+            Logger.d(TAG, "Sync loop started for system: $systemId")
             var madeProgress = true
             
             while (madeProgress) {
@@ -85,7 +85,7 @@ class SyncWorker(
                         when (action.type) {
                             PendingActionType.CREATE_MEMBER -> {
                                 val dto = json.decodeFromString(CreateMemberDto.serializer(), resolvedPayload)
-                                systemService.createMember(dto, fromSync = true).map { realMember ->
+                                systemService.createMember(dto, fromSync = true, systemId = action.systemId).map { realMember ->
                                     offlineManager.saveIdMapping(realMember.id, action.id)
                                     val currentMembers = offlineManager.getCachedMembers()?.toMutableList() ?: mutableListOf()
                                     currentMembers.removeAll { it.id == action.id }
@@ -99,24 +99,24 @@ class SyncWorker(
                             PendingActionType.UPDATE_MEMBER -> {
                                 val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
                                 val dto = json.decodeFromString(UpdateMemberDto.serializer(), resolvedPayload)
-                                systemService.updateMember(memberId, dto, fromSync = true)
+                                systemService.updateMember(memberId, dto, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.DELETE_MEMBER -> {
                                 val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
-                                systemService.deleteMember(memberId, fromSync = true)
+                                systemService.deleteMember(memberId, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.UPDATE_MEMBER_FIELD -> {
                                 val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
                                 val fieldId = resolveServerId(action.fieldId) ?: throw Exception("Missing fieldId")
-                                systemService.updateMemberField(memberId, fieldId, action.jsonPayload, fromSync = true)
+                                systemService.updateMemberField(memberId, fieldId, action.jsonPayload, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.UPDATE_SYSTEM -> {
                                 val dto = json.decodeFromString(UpdateSystemDto.serializer(), resolvedPayload)
-                                systemService.updateSystem(dto, fromSync = true)
+                                systemService.updateSystem(dto, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.CREATE_GROUP -> {
                                 val dto = json.decodeFromString(CreateGroupDto.serializer(), resolvedPayload)
-                                systemService.createGroup(dto, fromSync = true).map { realGroup ->
+                                systemService.createGroup(dto, fromSync = true, systemId = action.systemId).map { realGroup ->
                                     offlineManager.saveIdMapping(realGroup.id, action.id)
                                     val currentGroups = offlineManager.getCachedGroups()?.toMutableList() ?: mutableListOf()
                                     currentGroups.removeAll { it.id == action.id }
@@ -130,16 +130,16 @@ class SyncWorker(
                             PendingActionType.UPDATE_GROUP -> {
                                 val groupId = resolveServerId(action.memberId) ?: throw Exception("Missing groupId")
                                 val dto = json.decodeFromString(CreateGroupDto.serializer(), resolvedPayload)
-                                systemService.updateGroup(groupId, dto, fromSync = true)
+                                systemService.updateGroup(groupId, dto, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.DELETE_GROUP -> {
                                 val groupId = resolveServerId(action.memberId) ?: throw Exception("Missing groupId")
-                                systemService.deleteGroup(groupId, fromSync = true)
+                                systemService.deleteGroup(groupId, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.UPDATE_MEMBER_GROUPS -> {
                                 val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
                                 val dto = json.decodeFromString(UpdateMemberGroupsDto.serializer(), resolvedPayload)
-                                systemService.updateMemberGroups(memberId, dto.groupIds, fromSync = true)
+                                systemService.updateMemberGroups(memberId, dto.groupIds, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.UPLOAD_AVATAR -> {
                                 val fileName = action.jsonPayload
@@ -150,7 +150,7 @@ class SyncWorker(
                                     systemService.uploadSystemAvatar(imageBytes, fromSync = true)
                                 } else {
                                     val memberId = targetId ?: throw Exception("Missing memberId")
-                                    systemService.uploadMemberAvatar(memberId, imageBytes, fromSync = true)
+                                    systemService.uploadMemberAvatar(memberId, imageBytes, fromSync = true, systemId = action.systemId)
                                 }
                                 
                                 if (uploadResult.isSuccess) {
@@ -159,7 +159,7 @@ class SyncWorker(
                                 uploadResult
                             }
                             PendingActionType.CREATE_CUSTOM_FIELD -> {
-                                systemService.createCustomField(fromSync = true).map { realField ->
+                                systemService.createCustomField(fromSync = true, systemId = action.systemId).map { realField ->
                                     offlineManager.saveIdMapping(realField.id, action.id)
                                     val currentFields = offlineManager.getCachedCustomFields()?.toMutableList() ?: mutableListOf()
                                     currentFields.removeAll { it.id == action.id }
@@ -173,11 +173,29 @@ class SyncWorker(
                             PendingActionType.UPDATE_CUSTOM_FIELD -> {
                                 val fieldId = resolveServerId(action.fieldId) ?: throw Exception("Missing fieldId")
                                 val dto = json.decodeFromString(UpdateCustomFieldDefinitionDto.serializer(), resolvedPayload)
-                                systemService.updateCustomField(fieldId, dto, fromSync = true)
+                                systemService.updateCustomField(fieldId, dto, fromSync = true, systemId = action.systemId)
                             }
                             PendingActionType.DELETE_CUSTOM_FIELD -> {
                                 val fieldId = resolveServerId(action.fieldId) ?: throw Exception("Missing fieldId")
-                                systemService.deleteCustomField(fieldId, fromSync = true)
+                                systemService.deleteCustomField(fieldId, fromSync = true, systemId = action.systemId)
+                            }
+                            PendingActionType.CREATE_SYSTEM -> {
+                                val dto = json.decodeFromString(CreateSystemOrSubSystemDto.serializer(), resolvedPayload)
+                                systemService.createSubSystem(dto, fromSync = true).map { realSystem ->
+                                    offlineManager.saveIdMapping(realSystem.id, action.id)
+                                    val currentSystems = offlineManager.getCachedSystems()?.toMutableList() ?: mutableListOf()
+                                    currentSystems.removeAll { it.id == action.id }
+                                    if (currentSystems.none { it.id == realSystem.id }) {
+                                        currentSystems.add(realSystem)
+                                    }
+                                    offlineManager.cacheSystems(currentSystems)
+                                    realSystem
+                                }
+                            }
+                            PendingActionType.TRANSFER_MEMBER -> {
+                                val memberId = resolveServerId(action.memberId) ?: throw Exception("Missing memberId")
+                                val dto = json.decodeFromString(TransferMemberDto.serializer(), resolvedPayload)
+                                systemService.transferMember(memberId, dto, fromSync = true, systemId = action.systemId)
                             }
                             else -> Result.success(Unit)
                         }
@@ -222,16 +240,22 @@ class SyncWorker(
                 // 2. Process front sessions bulk AFTER everything else
                 val remainingActions = offlineManager.getPendingActions()
                 val frontActions = remainingActions.filter { it.type == PendingActionType.START_FRONT || it.type == PendingActionType.END_FRONT }
+                
                 if (frontActions.isNotEmpty()) {
-                    Logger.d(TAG, "Syncing ${frontActions.size} front sessions bulk")
-                    val result = systemService.syncFrontSessions()
-                    if (result.isSuccess) {
-                        madeProgress = true
-                        Logger.d(TAG, "Bulk sync successful")
-                    } else {
-                        val error = result.exceptionOrNull()?.message ?: ""
-                        Logger.e(TAG, "Bulk sync failed: $error")
-                        break
+                    val systemIds = frontActions.map { it.systemId }.distinct()
+                    
+                    for (sid in systemIds) {
+                        Logger.d(TAG, "Syncing front sessions bulk for system: ${sid ?: "default"}")
+                        val result = systemService.syncFrontSessions(sid)
+                        if (result.isSuccess) {
+                            madeProgress = true
+                            Logger.d(TAG, "Bulk sync successful for system: ${sid ?: "default"}")
+                        } else {
+                            val error = result.exceptionOrNull()?.message ?: ""
+                            Logger.e(TAG, "Bulk sync failed for system: ${sid ?: "default"} - $error")
+                            // We don't necessarily break the whole sync if one system fails, 
+                            // but we stop progress for this iteration.
+                        }
                     }
                 }
             }
