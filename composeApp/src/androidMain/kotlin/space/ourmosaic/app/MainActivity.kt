@@ -12,6 +12,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.content.Intent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import space.ourmosaic.app.system.initNotificationService
 import space.ourmosaic.app.system.updateFrontNotification
 import space.ourmosaic.app.system.FrontSession
@@ -20,6 +24,8 @@ import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.utils.initImageUtils
 
 class MainActivity : ComponentActivity() {
+    private var deepLinkState by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         io.kamel.core.applicationContext = this.applicationContext
@@ -31,9 +37,19 @@ class MainActivity : ComponentActivity() {
         startFrontNotificationEarly()
 
         val targetRoute = intent?.getStringExtra("target_route")
+        deepLinkState = intent?.data?.toString()
 
         setContent {
-            App(initialTargetRoute = targetRoute)
+            App(initialTargetRoute = targetRoute, initialDeepLink = deepLinkState)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val deepLink = intent.data?.toString()
+        if (deepLink != null) {
+            deepLinkState = deepLink
         }
     }
 

@@ -2,15 +2,13 @@ package space.ourmosaic.app
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.russhwolf.settings.set
 import io.kamel.core.config.KamelConfig
@@ -19,11 +17,8 @@ import io.kamel.core.config.takeFrom
 import io.kamel.image.config.Default
 import io.kamel.image.config.LocalKamelConfig
 import io.kamel.image.config.imageBitmapDecoder
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import space.ourmosaic.app.auth.AuthService
-import space.ourmosaic.app.i18n.MessageKey
 import space.ourmosaic.app.i18n.rememberI18nState
 import space.ourmosaic.app.navigation.AppRouter
 import space.ourmosaic.app.navigation.BackHandler
@@ -31,10 +26,6 @@ import space.ourmosaic.app.navigation.Route
 import space.ourmosaic.app.navigation.rememberNavState
 import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.system.*
-import space.ourmosaic.app.utils.Logger
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.JsonObject
-import space.ourmosaic.app.components.MosaicAvatar
 import space.ourmosaic.app.components.SystemSwitcher
 
 enum class AppTheme {
@@ -42,9 +33,52 @@ enum class AppTheme {
 }
 
 @Composable
-fun App(initialTargetRoute: String? = null) {
-    val authService = remember { AuthService() }
-    val offlineManager = remember { OfflineManager() }
+fun App(initialTargetRoute: String? = null, initialDeepLink: String? = null) {
+    var initializationError by remember { mutableStateOf<String?>(null) }
+
+    // On tente d'initialiser les services. Si l'un d'eux crash (ex: Keychain), on l'attrape.
+    val authService = remember {
+        try {
+            AuthService()
+        } catch (e: Exception) {
+            initializationError = "AuthService Error: ${e.message}\n${e.stackTraceToString()}"
+            null
+        }
+    }
+
+    val offlineManager = remember {
+        try {
+            if (authService != null) OfflineManager() else null
+        } catch (e: Exception) {
+            initializationError = "OfflineManager Error: ${e.message}\n${e.stackTraceToString()}"
+            null
+        }
+    }
+
+    if (initializationError != null) {
+        MaterialTheme(colorScheme = darkColorScheme()) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.errorContainer) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text("Mosaic Crash Report", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(8.dp))
+                    SelectionContainer {
+                        Text(initializationError!!, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    // Si on arrive ici, les services critiques sont chargés
+    if (authService == null || offlineManager == null) return
+
     val systemService = remember { SystemService(authService, offlineManager) }
     val chatService = remember { ChatService(authService) }
     val syncWorker = remember { SyncWorker(systemService, offlineManager, authService) }
@@ -136,6 +170,30 @@ fun App(initialTargetRoute: String? = null) {
                 }
             }
 
+            LaunchedEffect(initialDeepLink) {
+                initialDeepLink?.let { url ->
+                    if (url.startsWith("mosaic://")) {
+                        val path = url.substringAfter("mosaic://").substringAfter("/", "")
+                        val segments = path.split("/").filter { it.isNotEmpty() }
+                        
+                        if (segments.isEmpty()) return@let
+
+                        when (segments[0]) {
+                            "friend" -> {
+                                segments.getOrNull(1)?.let { friendId ->
+                                    if (authService.getAccessToken() != null) {
+                                        navState.navigateTo(Route.FriendSystem(friendId))
+                                    }
+                                }
+                            }
+                            "email-confirmed" -> {
+                                navState.navigateTo(Route.Login)
+                            }
+                        }
+                    }
+                }
+            }
+
             BackHandler(enabled = (drawerState.isOpen || navState.canGoBack) && !isLoggedOut) {
                 if (drawerState.isOpen) {
                     scope.launch { drawerState.close() }
@@ -149,22 +207,21 @@ fun App(initialTargetRoute: String? = null) {
                 gesturesEnabled = !isLoggedOut,
                 drawerContent = {
                     ModalDrawerSheet {
-                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                        SystemSwitcher(
-                            userMe = userMe,
-                            systems = systems,
-                            currentSystemId = currentSystemId,
-                            systemContextManager = systemContextManager,
-                            navState = navState,
-                            i18n = i18nState,
-                            authService = authService,
-                            onCloseDrawer = { scope.launch { drawerState.close() } }
-                        )
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            SystemSwitcher(
+                                userMe = userMe,
+                                systems = systems,
+                                currentSystemId = currentSystemId,
+                                systemContextManager = systemContextManager,
+                                navState = navState,
+                                i18n = i18nState,
+                                authService = authService,
+                                onCloseDrawer = { scope.launch { drawerState.close() } }
+                            )
 
-                        val isSystem = userMe?.isSystem == true
+                            val isSystem = userMe?.isSystem == true
 
                             Route.all.filter { route ->
-                                // Hide system-specific routes if user is not a system
                                 if (!isSystem) {
                                     route !is Route.System && route !is Route.MembersManage
                                 } else true
@@ -181,10 +238,7 @@ fun App(initialTargetRoute: String? = null) {
                                         val targetRoute = when (route) {
                                             is Route.System -> Route.System(currentSystemId)
                                             is Route.Chat -> Route.Chat(currentSystemId)
-                                            is Route.MembersManage -> Route.MembersManage(
-                                                currentSystemId
-                                            )
-
+                                            is Route.MembersManage -> Route.MembersManage(currentSystemId)
                                             else -> route
                                         }
                                         navState.navigateTo(targetRoute)
@@ -199,26 +253,26 @@ fun App(initialTargetRoute: String? = null) {
                 }
             ) {
                 Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-                        AppRouter(
-                            navState = navState,
-                            i18n = i18nState,
-                            appSettings = appSettings,
-                            currentSystemId = currentSystemId,
-                            onOpenDrawer = { scope.launch { drawerState.open() } },
-                            onLogout = { navState.navigateTo(Route.Login) },
-                            systemService = systemService,
-                            chatService = chatService,
-                            sseService = sseService,
-                            offlineManager = offlineManager,
-                            authService = authService,
-                            syncWorker = syncWorker,
-                            systemContextManager = systemContextManager,
-                            theme = theme,
-                            onThemeChange = {
-                                theme = it
-                                settings.set("app_theme", it.name)
-                            }
-                        )
+                    AppRouter(
+                        navState = navState,
+                        i18n = i18nState,
+                        appSettings = appSettings,
+                        currentSystemId = currentSystemId,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onLogout = { navState.navigateTo(Route.Login) },
+                        systemService = systemService,
+                        chatService = chatService,
+                        sseService = sseService,
+                        offlineManager = offlineManager,
+                        authService = authService,
+                        syncWorker = syncWorker,
+                        systemContextManager = systemContextManager,
+                        theme = theme,
+                        onThemeChange = {
+                            theme = it
+                            settings.set("app_theme", it.name)
+                        }
+                    )
                 }
             }
         }

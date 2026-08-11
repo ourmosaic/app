@@ -2,6 +2,8 @@ package space.ourmosaic.app
 
 import platform.UIKit.UIDevice
 import com.russhwolf.settings.ExperimentalSettingsImplementation
+import com.russhwolf.settings.KeychainSettings
+import com.russhwolf.settings.NSUserDefaultsSettings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -22,7 +24,15 @@ actual fun randomUUID(): String = platform.Foundation.NSUUID().UUIDString()
 actual fun createSettings(): com.russhwolf.settings.Settings = com.russhwolf.settings.NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
 
 @OptIn(ExperimentalSettingsImplementation::class)
-actual fun createEncryptedSettings(): com.russhwolf.settings.Settings = com.russhwolf.settings.KeychainSettings(service = "space.ourmosaic.app.auth")
+actual fun createEncryptedSettings(): com.russhwolf.settings.Settings {
+    return try {
+        KeychainSettings(service = "space.ourmosaic.app.secure")
+    } catch (e: Exception) {
+        // Fallback to NSUserDefaults if Keychain is inaccessible (e.g. missing entitlements in dev)
+        // This prevents the SIGABRT crash but is less secure.
+        NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
+    }
+}
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
