@@ -14,6 +14,8 @@ kotlin {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
+
+    applyDefaultHierarchyTemplate()
     
     val iosTargets = listOf(
         iosArm64(),
@@ -44,7 +46,8 @@ kotlin {
             implementation(libs.ktor.client.logging)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.multiplatform.settings)
+            implementation(libs.multiplatform.settings.core)
+            implementation(libs.multiplatform.settings.noarg)
             implementation(libs.kamel.image)
             implementation(libs.peekaboo.image.picker)
             implementation(libs.peekaboo.ui)
@@ -57,17 +60,10 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.androidx.security.crypto)
         }
-        val iosMain by creating {
-            dependsOn(commonMain.get())
-            dependencies {
-                implementation(libs.ktor.client.darwin)
-            }
+        iosMain.dependencies {
+            implementation(libs.ktor.client.darwin)
         }
-        iosTargets.forEach { 
-            val iosTargetMain = sourceSets.getByName("${it.name}Main")
-            iosTargetMain.dependsOn(iosMain)
-        }
-        
+
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)

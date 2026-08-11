@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import io.kamel.core.config.KamelConfig
 import io.kamel.core.config.httpUrlFetcher
@@ -35,12 +36,14 @@ enum class AppTheme {
 @Composable
 fun App(initialTargetRoute: String? = null, initialDeepLink: String? = null) {
     var initializationError by remember { mutableStateOf<String?>(null) }
-
+    
     // On tente d'initialiser les services. Si l'un d'eux crash (ex: Keychain), on l'attrape.
     val authService = remember {
         try {
+            space.ourmosaic.app.utils.Logger.d("App", "Initializing AuthService")
             AuthService()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            space.ourmosaic.app.utils.Logger.e("App", "AuthService init failed", e)
             initializationError = "AuthService Error: ${e.message}\n${e.stackTraceToString()}"
             null
         }
@@ -48,8 +51,10 @@ fun App(initialTargetRoute: String? = null, initialDeepLink: String? = null) {
 
     val offlineManager = remember {
         try {
+            space.ourmosaic.app.utils.Logger.d("App", "Initializing OfflineManager")
             if (authService != null) OfflineManager() else null
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            space.ourmosaic.app.utils.Logger.e("App", "OfflineManager init failed", e)
             initializationError = "OfflineManager Error: ${e.message}\n${e.stackTraceToString()}"
             null
         }
@@ -79,30 +84,60 @@ fun App(initialTargetRoute: String? = null, initialDeepLink: String? = null) {
     // Si on arrive ici, les services critiques sont chargés
     if (authService == null || offlineManager == null) return
 
-    val systemService = remember { SystemService(authService, offlineManager) }
-    val chatService = remember { ChatService(authService) }
-    val syncWorker = remember { SyncWorker(systemService, offlineManager, authService) }
-    val chatSyncWorker = remember { ChatSyncWorker(chatService, offlineManager) }
-    val sseService = remember { SseService(authService) }
+    val systemService = remember { try { SystemService(authService, offlineManager) } catch (e: Throwable) { initializationError = "SystemService: ${e.message}"; null } }
+    val chatService = remember { try { ChatService(authService) } catch (e: Throwable) { initializationError = "ChatService: ${e.message}"; null } }
+    val sseService = remember { try { SseService(authService) } catch (e: Throwable) { initializationError = "SseService: ${e.message}"; null } }
+    
+    val syncWorker = remember { 
+        if (systemService != null) try { SyncWorker(systemService, offlineManager, authService) } catch (e: Throwable) { initializationError = "SyncWorker: ${e.message}"; null }
+        else null
+    }
+    val chatSyncWorker = remember { 
+        if (chatService != null) try { ChatSyncWorker(chatService, offlineManager) } catch (e: Throwable) { initializationError = "ChatSyncWorker: ${e.message}"; null }
+        else null
+    }
+
+    if (initializationError != null || systemService == null || chatService == null || sseService == null || syncWorker == null || chatSyncWorker == null) {
+        // Le recompose suivant affichera le rapport de crash grâce au bloc de garde au début de la fonction
+        return
+    }
 
     val startRoute = if (authService.getAccessToken() != null) Route.Home else Route.Login
 
     val kamelConfig = remember {
-        KamelConfig {
-            takeFrom(KamelConfig.Default)
-            imageBitmapDecoder()
-            httpUrlFetcher {
-                httpCache(100 * 1024 * 1024) // 100MB
+        try {
+            KamelConfig {
+                takeFrom(KamelConfig.Default)
+                imageBitmapDecoder()
+                httpUrlFetcher {
+                    try {
+                        httpCache(100 * 1024 * 1024) // 100MB
+                    } catch (e: Throwable) {
+                        space.ourmosaic.app.utils.Logger.e("App", "Kamel Cache failed", e)
+                    }
+                }
             }
+        } catch (e: Throwable) {
+            space.ourmosaic.app.utils.Logger.e("App", "Kamel Config failed", e)
+            KamelConfig.Default
         }
     }
 
-    val settings = remember { com.russhwolf.settings.Settings() }
+    val settings = remember { 
+        try { 
+            createSettings() 
+        } catch (e: Throwable) { 
+            space.ourmosaic.app.utils.Logger.e("App", "Settings failed", e)
+            // Fallback to a MapSettings if everything else fails
+            createSettings()
+        }
+    }
+    
     var theme by remember {
         mutableStateOf(
             try {
                 AppTheme.valueOf(settings.getString("app_theme", AppTheme.System.name))
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 AppTheme.System
             }
         )

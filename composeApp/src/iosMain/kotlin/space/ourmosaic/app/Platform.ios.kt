@@ -25,7 +25,12 @@ actual fun createSettings(): com.russhwolf.settings.Settings = com.russhwolf.set
 
 @OptIn(ExperimentalSettingsImplementation::class)
 actual fun createEncryptedSettings(): com.russhwolf.settings.Settings {
-    return NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
+    return try {
+        KeychainSettings(service = "space.ourmosaic.app")
+    } catch (e: Throwable) {
+        // Capture absolument tout (Error, Exception, Native exceptions)
+        NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
+    }
 }
 
 @OptIn(ExperimentalForeignApi::class)
