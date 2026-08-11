@@ -26,7 +26,9 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Android Release
-        run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease
+        run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease -Pkotlin.mpp.androidSourceSetLayoutV2AndroidStyleDirs.nowarn=true
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g"
 
       - name: Sign Android Release and rename APK
         run: |
@@ -110,7 +112,9 @@ jobs:
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
       - name: Build iOS Framework (Kotlin pour ARM64)
-        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64
+        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 -Pkotlin.native.jvmArgs="-Xmx8g" -Pkotlin.mpp.androidSourceSetLayoutV2AndroidStyleDirs.nowarn=true -Pkotlin.mpp.applyDefaultHierarchyTemplate=false
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx8g"
 
       - name: Force last Xcode version
         uses: maxim-lobanov/setup-xcode@v1
