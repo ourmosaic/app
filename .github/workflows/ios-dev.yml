@@ -81,6 +81,7 @@ jobs:
 
       - name: Generate Ad Hoc Export Options
         run: |
+          # Création d'un plist temporaire pour forcer l'export Ad Hoc avec le profil
           cat <<EOF > iosApp/ExportOptionsAdHoc.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -92,6 +93,11 @@ jobs:
               <string>88KUPU5378</string>
               <key>compileBitcode</key>
               <false/>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>space.ourmosaic.app</key>
+                  <string>${{ secrets.DEV_PROVISIONING_PROFILE_NAME }}</string>
+              </dict>
           </dict>
           </plist>
           EOF
