@@ -22,6 +22,14 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Cache Konan (Kotlin/Native)
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle.properties', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-konan-
+
       - name: Make gradlew executable
         run: chmod +x gradlew
 
@@ -82,7 +90,6 @@ jobs:
 
       - name: Generate Ad Hoc Export Options
         run: |
-          # Création d'un plist temporaire pour forcer l'export Ad Hoc avec le profil
           cat <<EOF > iosApp/ExportOptionsAdHoc.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
