@@ -28,21 +28,29 @@ jobs:
       - name: Build Android Release
         run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease
 
-      - name: Sign Android Release
+      - name: Sign Android Release and rename APK
         run: |
+          VERSION_NAME=$(grep "mosaic.versionName" gradle.properties | cut -d'=' -f2)
+          echo "Signing Android artifacts for version $VERSION_NAME"
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
 
-          BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
+          BUILD_TOOLS=$(ls "$ANDROID_HOME/build-tools/" | sort -V | tail -1)
           APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
 
+          signed_any=0
           for apk in composeApp/build/outputs/apk/release/*.apk; do
+            signed_out="${apk%.apk}-signed.apk"
             $APKSIGNER sign \
               --ks keystore.jks \
               --ks-key-alias "${{ secrets.ANDROID_KEYSTORE_ALIAS }}" \
               --ks-pass "pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
               --key-pass "pass:${{ secrets.ANDROID_KEY_PASSWORD }}" \
-              --out "${apk%.apk}-signed.apk" \
+              --out "$signed_out" \
               "$apk"
+            if [ $signed_any -eq 0 ]; then
+              mv "$signed_out" "composeApp/build/outputs/apk/release/Mosaic-v${VERSION_NAME}.apk"
+              signed_any=1
+            fi
           done
 
           rm keystore.jks
@@ -51,7 +59,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            composeApp/build/outputs/apk/release/*.apk
+            composeApp/build/outputs/apk/release/Mosaic-v*.apk
             composeApp/build/outputs/bundle/release/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,16 +112,6 @@ jobs:
       - name: Build iOS Framework (Kotlin pour ARM64)
         run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64
 
-      - name: Generate iOS version with gradle.properties
-        run: |
-          VERSION_NAME=$(grep "mosaic.versionName" gradle.properties | cut -d'=' -f2)
-          VERSION_CODE=$(grep "mosaic.versionCode" gradle.properties | cut -d'=' -f2)
-          
-          echo "iOS -> $VERSION_NAME ($VERSION_CODE)"
-          
-          echo "MARKETING_VERSION=$VERSION_NAME" >> $GITHUB_ENV
-          echo "CURRENT_PROJECT_VERSION=$VERSION_CODE" >> $GITHUB_ENV
-
       - name: Force last Xcode version
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -121,6 +119,9 @@ jobs:
 
       - name: Build & Archive Xcode Project
         run: |
+          VERSION_NAME=$(grep "mosaic.versionName" gradle.properties | cut -d'=' -f2)
+          VERSION_CODE=$(grep "mosaic.versionCode" gradle.properties | cut -d'=' -f2)
+          echo "iOS -> $VERSION_NAME ($VERSION_CODE)"
           cd iosApp
           xcodebuild -project iosApp.xcodeproj \
                      -scheme iosApp \
@@ -131,8 +132,8 @@ jobs:
                      CODE_SIGN_STYLE="Manual" \
                      PROVISIONING_PROFILE_SPECIFIER="${{ secrets.PROVISIONING_PROFILE_NAME }}" \
                      CODE_SIGN_IDENTITY="iPhone Distribution" \
-                     MARKETING_VERSION="$MARKETING_VERSION" \
-                     CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION" \
+                     MARKETING_VERSION="$VERSION_NAME" \
+                     CURRENT_PROJECT_VERSION="$VERSION_CODE" \
                      clean archive
 
       - name: Export .ipa

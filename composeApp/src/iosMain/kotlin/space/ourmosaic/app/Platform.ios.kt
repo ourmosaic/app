@@ -26,7 +26,7 @@ actual fun createEncryptedSettings(): com.russhwolf.settings.Settings = com.russ
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun rememberFilePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Unit {
+actual fun rememberFilePickerLauncher(onResult: (FilePickerResult?) -> Unit): () -> Unit {
     val delegate = remember {
         object : platform.darwin.NSObject(), UIDocumentPickerDelegateProtocol {
             override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {
@@ -38,7 +38,8 @@ actual fun rememberFilePickerLauncher(onResult: (ByteArray?) -> Unit): () -> Uni
                         bytes.usePinned { pinned ->
                             memcpy(pinned.addressOf(0), data.bytes, data.length)
                         }
-                        onResult(bytes)
+                        val fileName = url.lastPathComponent ?: "file.json"
+                        onResult(FilePickerResult(fileName, bytes))
                     } else {
                         onResult(null)
                     }
