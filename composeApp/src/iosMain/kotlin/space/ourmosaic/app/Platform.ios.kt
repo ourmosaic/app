@@ -25,13 +25,7 @@ actual fun createSettings(): com.russhwolf.settings.Settings = com.russhwolf.set
 
 @OptIn(ExperimentalSettingsImplementation::class)
 actual fun createEncryptedSettings(): com.russhwolf.settings.Settings {
-    return try {
-        KeychainSettings(service = "space.ourmosaic.app.secure")
-    } catch (e: Exception) {
-        // Fallback to NSUserDefaults if Keychain is inaccessible (e.g. missing entitlements in dev)
-        // This prevents the SIGABRT crash but is less secure.
-        NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
-    }
+    return NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
 }
 
 @OptIn(ExperimentalForeignApi::class)
