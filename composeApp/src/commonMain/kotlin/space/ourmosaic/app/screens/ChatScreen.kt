@@ -172,8 +172,8 @@ fun ChatScreen(
         if (messageText.isNotBlank() && selectedSender != null && channelId != null) {
             val content = messageText
             val sender = selectedSender!!
-            val tempId = "temp-${Clock.System.now().toEpochMilliseconds()}"
-            val timestamp = Clock.System.now().toString()
+            val tempId = "temp-${kotlin.time.Clock.System.now().toEpochMilliseconds()}"
+            val timestamp = kotlin.time.Clock.System.now().toString()
             
             val pendingMessage = ChatMessageResponse(
                 id = tempId,

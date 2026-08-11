@@ -564,7 +564,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
     }
 
     fun triggerSync() {
-        _syncTrigger.value = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        _syncTrigger.value = kotlin.time.Clock.System.now().toEpochMilliseconds()
         _pendingActionsCount.value = getPendingActions().size
     }
 
@@ -831,7 +831,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
                     // If we have a server ID and it's NOT in the list of active sessions from the server,
                     // it means the session has ended on the server side.
                     if (cid != null && !serverActiveIds.contains(cid)) {
-                        s.copy(endTime = Clock.System.now().toString())
+                        s.copy(endTime = kotlin.time.Clock.System.now().toString())
                     } else s
                 } else s
             }
@@ -1091,7 +1091,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
 
     fun enqueueChatMessage(type: ChatMessageQueueType, channelId: String, content: String, senderId: String, messageId: String? = null, systemId: String? = null) {
         val pending = getPendingChatMessages().toMutableList()
-        val id = "${type.name.lowercase()}_${Clock.System.now().toEpochMilliseconds()}"
+        val id = "${type.name.lowercase()}_${kotlin.time.Clock.System.now().toEpochMilliseconds()}"
         pending.add(PendingChatMessage(
             id = id,
             type = type,
@@ -1100,7 +1100,7 @@ class OfflineManager(private val settings: Settings = Settings()) {
             content = content,
             senderId = senderId,
             systemId = systemId,
-            timestamp = Clock.System.now().toEpochMilliseconds()
+            timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
         ))
         savePendingChatMessages(pending)
     }

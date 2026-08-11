@@ -2,7 +2,7 @@ package space.ourmosaic.app.components
 
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import space.ourmosaic.app.i18n.I18nState

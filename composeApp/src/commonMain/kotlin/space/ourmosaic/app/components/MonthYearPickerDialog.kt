@@ -9,7 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.datetime.Clock
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import space.ourmosaic.app.i18n.I18nState
@@ -24,7 +24,7 @@ fun MonthYearPickerDialog(
     i18n: I18nState
 ) {
     val parts = initialValue?.split("-") ?: emptyList()
-    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    val now = kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
     
     var monthStr by remember { mutableStateOf(parts.getOrNull(0) ?: "") }
     var yearStr by remember { mutableStateOf(parts.getOrNull(1) ?: now.year.toString()) }

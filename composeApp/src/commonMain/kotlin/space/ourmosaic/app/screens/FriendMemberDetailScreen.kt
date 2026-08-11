@@ -23,7 +23,7 @@ import androidx.compose.material.icons.filled.Report
 import space.ourmosaic.app.system.*
 import space.ourmosaic.app.utils.ColorUtils
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 

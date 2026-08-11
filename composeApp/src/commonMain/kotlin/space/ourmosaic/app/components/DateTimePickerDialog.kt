@@ -7,6 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.datetime.*
+import kotlin.time.Instant
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
 
@@ -21,9 +22,9 @@ fun DateTimePickerDialog(
     var showTimePicker by remember { mutableStateOf(false) }
     
     val initialInstant = try {
-        initialValue?.let { Instant.parse(it) } ?: Clock.System.now()
+        initialValue?.let { kotlin.time.Instant.parse(it) } ?: kotlin.time.Clock.System.now()
     } catch (e: Exception) {
-        Clock.System.now()
+        kotlin.time.Clock.System.now()
     }
     
     val initialDateTime = initialInstant.toLocalDateTime(TimeZone.currentSystemDefault())

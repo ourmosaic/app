@@ -225,7 +225,7 @@ class SyncWorker(
                                     id = action.id,
                                     actionType = action.type,
                                     message = msg,
-                                    timestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                                 )
                             )
                             offlineManager.removeAction(action.id)

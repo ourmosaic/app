@@ -21,7 +21,7 @@ class OfflineManagerTest {
     @Test
     fun testStartEndStartFrontingCycle() = runTest {
         val memberId = "member1"
-        val now = Clock.System.now().toEpochMilliseconds()
+        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
 
         // 1. Start session
         val startAction1 = PendingAction(
@@ -77,7 +77,7 @@ class OfflineManagerTest {
     @Test
     fun testSingleActiveSessionInvariant() = runTest {
         val memberId = "member1"
-        val now = Clock.System.now().toEpochMilliseconds()
+        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
 
         // Start session 1
         offlineManager.queueAction(PendingAction(
@@ -115,7 +115,7 @@ class OfflineManagerTest {
         val memberId = "member1"
         val localId = "front_start_local"
         val serverUuid = "server-uuid-123"
-        val now = Clock.System.now()
+        val now = kotlin.time.Clock.System.now()
 
         // 1. Local start
         offlineManager.queueAction(PendingAction(

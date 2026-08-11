@@ -20,7 +20,6 @@ import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.offline.PendingAction
 import space.ourmosaic.app.offline.PendingActionType
-import kotlin.random.Random
 
 class SystemService(
     private val authService: AuthService,
@@ -100,7 +99,7 @@ class SystemService(
                     id = actionId,
                     type = PendingActionType.CREATE_SYSTEM,
                     jsonPayload = json.encodeToString(CreateSystemOrSubSystemDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -224,7 +223,7 @@ class SystemService(
                     type = PendingActionType.UPDATE_SYSTEM,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateSystemDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -280,7 +279,7 @@ class SystemService(
                     type = PendingActionType.CREATE_MEMBER,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(CreateMemberDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -322,8 +321,8 @@ class SystemService(
                     privacy = dto.privacy ?: PrivacyLevel.PRIVATE,
                     inDormancy = dto.inDormancy,
                     systemId = settings.getStringOrNull("system_id") ?: "",
-                    createdAt = Clock.System.now().toString(),
-                    updatedAt = Clock.System.now().toString()
+                    createdAt = kotlin.time.Clock.System.now().toString(),
+                    updatedAt = kotlin.time.Clock.System.now().toString()
                 ))
             } else Result.failure(e)
         }
@@ -343,7 +342,7 @@ class SystemService(
                     memberId = memberId,
                     systemId = systemId,
                     jsonPayload = "{}",
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -407,7 +406,7 @@ class SystemService(
             memberId = memberId,
             systemId = systemId,
             jsonPayload = json.encodeToString(TransferMemberDto.serializer(), dto),
-            timestamp = Clock.System.now().toEpochMilliseconds()
+            timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
         )
 
         // 2. Optimistic UI update
@@ -478,7 +477,7 @@ class SystemService(
                     memberId = memberId,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateMemberDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -545,7 +544,7 @@ class SystemService(
                     fieldId = fieldId,
                     systemId = systemId,
                     jsonPayload = value,
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -610,7 +609,7 @@ class SystemService(
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
         if (actionId != null) {
-            val fileName = "avatar_${memberId}_${Clock.System.now().toEpochMilliseconds()}.jpg"
+            val fileName = "avatar_${memberId}_${kotlin.time.Clock.System.now().toEpochMilliseconds()}.jpg"
             space.ourmosaic.app.utils.writeToCache(fileName, avatarBytes)
             
             offlineManager.queueAction(
@@ -620,7 +619,7 @@ class SystemService(
                     memberId = memberId,
                     systemId = systemId,
                     jsonPayload = fileName,
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -670,7 +669,7 @@ class SystemService(
                     memberId = groupId,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -725,7 +724,7 @@ class SystemService(
         
         val actionId = if (!fromSync) generateId(PendingActionType.UPLOAD_AVATAR) else null
         if (actionId != null) {
-            val fileName = "avatar_me_${Clock.System.now().toEpochMilliseconds()}.jpg"
+            val fileName = "avatar_me_${kotlin.time.Clock.System.now().toEpochMilliseconds()}.jpg"
             space.ourmosaic.app.utils.writeToCache(fileName, avatarBytes)
             
             offlineManager.queueAction(
@@ -735,7 +734,7 @@ class SystemService(
                     memberId = "@me",
                     systemId = systemId,
                     jsonPayload = fileName,
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -812,7 +811,7 @@ class SystemService(
                     type = PendingActionType.CREATE_CUSTOM_FIELD,
                     systemId = systemId,
                     jsonPayload = "{}",
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -868,7 +867,7 @@ class SystemService(
                     fieldId = fieldId,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateCustomFieldDefinitionDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -934,7 +933,7 @@ class SystemService(
                     fieldId = fieldId,
                     systemId = systemId,
                     jsonPayload = "{}",
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -966,7 +965,7 @@ class SystemService(
     }
 
     suspend fun startFrontSession(memberId: String, systemId: String? = null): Result<FrontSession> {
-        val now = Clock.System.now()
+        val now = kotlin.time.Clock.System.now()
         val timestamp = now.toEpochMilliseconds()
         val actionId = generateId(PendingActionType.START_FRONT)
 
@@ -1037,7 +1036,7 @@ class SystemService(
     }
 
     suspend fun endFrontSession(memberId: String, sessionId: String? = null, systemId: String? = null): Result<FrontSession> {
-        val now = Clock.System.now()
+        val now = kotlin.time.Clock.System.now()
         val timestamp = now.toEpochMilliseconds()
         val actionId = generateId(PendingActionType.END_FRONT)
 
@@ -1330,7 +1329,7 @@ class SystemService(
                     type = PendingActionType.CREATE_GROUP,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(CreateGroupDto.serializer(), body),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -1400,7 +1399,7 @@ class SystemService(
                     memberId = groupId,
                     systemId = systemId,
                     jsonPayload = "{}",
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
@@ -1450,7 +1449,7 @@ class SystemService(
                     memberId = memberId,
                     systemId = systemId,
                     jsonPayload = json.encodeToString(UpdateMemberGroupsDto.serializer(), dto),
-                    timestamp = Clock.System.now().toEpochMilliseconds()
+                    timestamp = kotlin.time.Clock.System.now().toEpochMilliseconds()
                 ),
                 trigger = false
             )
