@@ -11,11 +11,10 @@ actual fun updateFrontNotification(fronters: List<String>) {
         return
     }
 
-    // On ne demande plus l'autorisation ici, on se contente d'essayer d'afficher
-    // Si l'autorisation n'est pas là, ça ne fera rien (comportement iOS standard)
     val content = UNMutableNotificationContent().apply {
         setTitle("Current fronters")
         setBody(fronters.joinToString(", "))
+        setSound(UNNotificationSound.defaultSound())
     }
     
     val request = UNNotificationRequest.requestWithIdentifier(
