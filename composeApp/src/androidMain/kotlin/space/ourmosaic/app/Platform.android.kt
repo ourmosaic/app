@@ -4,6 +4,29 @@ import android.os.Build
 
 class AndroidPlatform : Platform {
     override val name: String = "Android ${Build.VERSION.SDK_INT}"
+    override val versionName: String by lazy {
+        try {
+            val context = MosaicApplication.INSTANCE
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: "unknown"
+        } catch (e: Exception) {
+            "unknown"
+        }
+    }
+    override val versionCode: Int by lazy {
+        try {
+            val context = MosaicApplication.INSTANCE
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode
+            }
+        } catch (e: Exception) {
+            0
+        }
+    }
 }
 
 actual fun getPlatform(): Platform = AndroidPlatform()

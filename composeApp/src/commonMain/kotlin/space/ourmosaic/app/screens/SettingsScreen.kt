@@ -25,6 +25,7 @@ import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.AppLanguage
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
+import space.ourmosaic.app.getPlatform
 import space.ourmosaic.app.system.AppSettings
 import space.ourmosaic.app.system.requestNotificationPermission
 
@@ -245,6 +246,17 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(i18n.text(MessageKey.LogoutButton))
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            val platform = remember { getPlatform() }
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "v${platform.versionName} (${platform.versionCode})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
             }
         }
     }

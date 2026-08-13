@@ -14,6 +14,8 @@ import platform.CoreCrypto.CC_MD5
 
 class IOSPlatform: Platform {
     override val name: String = UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
+    override val versionName: String = NSBundle.mainBundle.infoDictionary?.get("CFBundleShortVersionString") as? String ?: "unknown"
+    override val versionCode: Int = (NSBundle.mainBundle.infoDictionary?.get("CFBundleVersion") as? String)?.toIntOrNull() ?: 0
 }
 
 actual fun getPlatform(): Platform = IOSPlatform()

@@ -2,6 +2,8 @@ package space.ourmosaic.app
 
 interface Platform {
     val name: String
+    val versionName: String
+    val versionCode: Int
 }
 
 expect fun getPlatform(): Platform

@@ -286,6 +286,10 @@ private val englishMessages = mapOf(
     MessageKey.MemberTransferSuccess to "Member transferred successfully.",
     MessageKey.MemberTransferError to "Failed to transfer member: %s",
     MessageKey.FriendStatusGlobalFront to "Also active on: %s",
+    MessageKey.PowTitle to "Verification in progress...",
+    MessageKey.PowDescription to "Checking that you're not a robot. Meanwhile, you can draw!",
+    MessageKey.PowEffacer to "Clear",
+    MessageKey.PowCalculEnCours to "Calculating: %s tries",
 )
 
 private val frenchMessages = mapOf(
@@ -505,4 +509,8 @@ private val frenchMessages = mapOf(
     MessageKey.MemberTransferSuccess to "Membre transféré avec succès.",
     MessageKey.MemberTransferError to "Échec du transfert : %s",
     MessageKey.FriendStatusGlobalFront to "Aussi actif sur : %s",
+    MessageKey.PowTitle to "Vérification en cours...",
+    MessageKey.PowDescription to "On vérifie que vous n'êtes pas un robot. Pendant ce temps, vous pouvez dessiner !",
+    MessageKey.PowEffacer to "Effacer",
+    MessageKey.PowCalculEnCours to "Calcul en cours : %s essais",
 )

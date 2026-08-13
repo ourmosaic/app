@@ -226,5 +226,9 @@ enum class MessageKey {
     MemberTransferSuccess,
     MemberTransferError,
     FriendStatusGlobalFront,
+    PowTitle,
+    PowDescription,
+    PowEffacer,
+    PowCalculEnCours,
 }
 
