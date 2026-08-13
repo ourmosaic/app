@@ -9,7 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
@@ -29,6 +31,7 @@ fun LoginScreen(
     var federation by remember { mutableStateOf("api.ourmosaic.space") }
     
     var isLoading by remember { mutableStateOf(false) }
+    var powProgress by remember { mutableStateOf<Int?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -110,17 +113,43 @@ fun LoginScreen(
                 scope.launch {
                     isLoading = true
                     errorMessage = null
-                    val result = if (isRegisterMode) {
-                        authService.register(federation, username, email, password)
-                    } else {
-                        authService.login(federation, username, password)
-                    }
+                    powProgress = null
                     
-                    isLoading = false
-                    if (result.isSuccess) {
-                        onLoginSuccess()
-                    } else {
-                        errorMessage = result.exceptionOrNull()?.message ?: "Unknown error"
+                    try {
+                        val result = if (isRegisterMode) {
+                            val challengeResult = authService.getPowChallenge(federation)
+                            if (challengeResult.isFailure) {
+                                throw challengeResult.exceptionOrNull() ?: Exception("Failed to get challenge")
+                            }
+                            val challenge = challengeResult.getOrThrow()
+                            
+                            val solution = withContext(Dispatchers.Default) {
+                                authService.solvePow(challenge) { tries ->
+                                    scope.launch { powProgress = tries }
+                                }
+                            }
+                            
+                            val verifyResult = authService.verifyPowChallenge(federation, challenge.id, solution)
+                            if (verifyResult.isFailure) {
+                                throw verifyResult.exceptionOrNull() ?: Exception("Failed to verify PoW")
+                            }
+                            val powToken = verifyResult.getOrThrow()
+                            
+                            authService.register(federation, username, email, password, powToken)
+                        } else {
+                            authService.login(federation, username, password)
+                        }
+                        
+                        if (result.isSuccess) {
+                            onLoginSuccess()
+                        } else {
+                            errorMessage = result.exceptionOrNull()?.message ?: "Unknown error"
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = e.message ?: "An error occurred"
+                    } finally {
+                        isLoading = false
+                        powProgress = null
                     }
                 }
             },
@@ -128,11 +157,17 @@ fun LoginScreen(
             enabled = !isLoading && username.isNotBlank() && password.isNotBlank() && (!isRegisterMode || email.isNotBlank())
         ) {
             if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    strokeWidth = 2.dp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    if (powProgress != null) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Chargement... (${powProgress})")
+                    }
+                }
             } else {
                 Text(if (isRegisterMode) i18n.text(MessageKey.RegisterButton) else i18n.text(MessageKey.LoginButton))
             }

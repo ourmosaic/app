@@ -105,13 +105,16 @@ class AuthService private constructor() {
         }
     }
 
-    suspend fun register(federation: String, username: String, email: String, password: String): Result<AuthenticationResponse> {
+    suspend fun register(federation: String, username: String, email: String, password: String, powToken: String? = null): Result<AuthenticationResponse> {
         val url = "https://$federation/auth/register"
         val requestBody = RegisterRequest(username = username, email = email, password = password)
 
         return try {
             val response = client.post(url) {
                 contentType(ContentType.Application.Json)
+                if (powToken != null) {
+                    header("x-pow-token", "Bearer $powToken")
+                }
                 setBody(requestBody)
             }
             if (response.status.isSuccess()) {
@@ -447,6 +450,76 @@ class AuthService private constructor() {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun getPowChallenge(federation: String): Result<PowChallenge> {
+        val url = "https://$federation/auth/pow/challenge"
+        return try {
+            val response = client.get(url)
+            if (response.status.isSuccess()) {
+                Result.success(response.body<PowChallenge>())
+            } else {
+                Result.failure(Exception("Failed to get PoW challenge: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun verifyPowChallenge(federation: String, challengeId: String, solution: String): Result<String> {
+        val url = "https://$federation/auth/pow/challenge/verify"
+        return try {
+            val response = client.post(url) {
+                contentType(ContentType.Application.Json)
+                setBody(PowSolution(challengeId, solution))
+            }
+            if (response.status.isSuccess()) {
+                val body = response.body<PowVerificationResponse>()
+                if (body.valid && body.token != null) {
+                    Result.success(body.token)
+                } else {
+                    Result.failure(Exception("PoW solution invalid"))
+                }
+            } else {
+                Result.failure(Exception("Failed to verify PoW solution: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun solvePow(challenge: PowChallenge, onProgress: (Int) -> Unit = {}): String {
+        val n1 = challenge.nonce
+        val diff = challenge.difficulty
+        val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        
+        fun rstr(len: Int): String {
+            return (1..len).map { chars.random() }.joinToString("")
+        }
+
+        fun countLeadingZeros(hex: String): Int {
+            val bin = hex.map {
+                it.toString().toInt(16).toString(2).padStart(4, '0') 
+            }.joinToString("")
+            
+            var zeros = 0
+            for (char in bin) {
+                if (char == '0') zeros++ else break
+            }
+            return zeros
+        }
+
+        var tries = 0
+        while (true) {
+            tries++
+            if (tries % 1000 == 0) onProgress(tries)
+            
+            val n2 = rstr(8)
+            val hex = space.ourmosaic.app.md5(n1 + n2)
+            if (countLeadingZeros(hex) >= diff) {
+                return n2
+            }
         }
     }
 }

@@ -6,12 +6,11 @@ import com.russhwolf.settings.KeychainSettings
 import com.russhwolf.settings.NSUserDefaultsSettings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.usePinned
+import kotlinx.cinterop.*
 import platform.Foundation.*
 import platform.UIKit.*
 import platform.posix.memcpy
+import platform.CoreCrypto.CC_MD5
 
 class IOSPlatform: Platform {
     override val name: String = UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
@@ -21,6 +20,18 @@ actual fun getPlatform(): Platform = IOSPlatform()
 
 actual fun randomUUID(): String = platform.Foundation.NSUUID().UUIDString()
 
+@OptIn(ExperimentalForeignApi::class)
+actual fun md5(input: String): String {
+    val data = input.encodeToByteArray()
+    val digest = UByteArray(16)
+    data.usePinned { inputPinned ->
+        digest.usePinned { digestPinned ->
+            CC_MD5(inputPinned.addressOf(0), data.size.toUInt(), digestPinned.addressOf(0))
+        }
+    }
+    return digest.joinToString("") { it.toString(16).padStart(2, '0') }
+}
+
 actual fun createSettings(): com.russhwolf.settings.Settings = com.russhwolf.settings.NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
 
 @OptIn(ExperimentalSettingsImplementation::class)
@@ -28,7 +39,6 @@ actual fun createEncryptedSettings(): com.russhwolf.settings.Settings {
     return try {
         KeychainSettings(service = "space.ourmosaic.app")
     } catch (e: Throwable) {
-        // Capture absolument tout (Error, Exception, Native exceptions)
         NSUserDefaultsSettings(platform.Foundation.NSUserDefaults.standardUserDefaults)
     }
 }

@@ -8,6 +8,8 @@ expect fun getPlatform(): Platform
 
 expect fun randomUUID(): String
 
+expect fun md5(input: String): String
+
 expect fun createSettings(): com.russhwolf.settings.Settings
 
 expect fun createEncryptedSettings(): com.russhwolf.settings.Settings

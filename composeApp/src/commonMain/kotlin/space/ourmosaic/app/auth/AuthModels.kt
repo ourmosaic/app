@@ -18,6 +18,26 @@ data class RegisterRequest(
 )
 
 @Serializable
+data class PowChallenge(
+    val id: String,
+    val nonce: String,
+    val difficulty: Int,
+    val validity: Int
+)
+
+@Serializable
+data class PowSolution(
+    val challengeId: String,
+    val solution: String
+)
+
+@Serializable
+data class PowVerificationResponse(
+    val valid: Boolean,
+    val token: String? = null
+)
+
+@Serializable
 data class AuthenticationResponse(
     val accessToken: String,
     val refreshToken: String,

@@ -10,6 +10,12 @@ actual fun getPlatform(): Platform = AndroidPlatform()
 
 actual fun randomUUID(): String = java.util.UUID.randomUUID().toString()
 
+actual fun md5(input: String): String {
+    val md = java.security.MessageDigest.getInstance("MD5")
+    val digest = md.digest(input.toByteArray())
+    return digest.joinToString("") { "%02x".format(it) }
+}
+
 actual fun createSettings(): com.russhwolf.settings.Settings = 
     com.russhwolf.settings.SharedPreferencesSettings(
         MosaicApplication.INSTANCE.getSharedPreferences("mosaic_settings", android.content.Context.MODE_PRIVATE)
