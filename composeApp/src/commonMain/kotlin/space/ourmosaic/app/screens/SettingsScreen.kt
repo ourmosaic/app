@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
@@ -202,6 +203,27 @@ fun SettingsScreen(
                     Icon(Icons.Default.Lock, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(i18n.text(MessageKey.SafetyBlockedEntities))
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = i18n.text(MessageKey.SettingsDraw),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Button(
+                    onClick = { onNavigate(space.ourmosaic.app.navigation.Route.Draw) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(i18n.text(MessageKey.SettingsDraw))
                 }
             }
 

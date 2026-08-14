@@ -230,5 +230,8 @@ enum class MessageKey {
     PowDescription,
     PowEffacer,
     PowCalculEnCours,
+    SettingsDraw,
+    DrawTitle,
+    DrawSave,
 }
 

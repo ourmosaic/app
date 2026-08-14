@@ -29,6 +29,7 @@ sealed class Route(val icon: ImageVector, val titleKey: MessageKey) {
     data class FriendMemberDetail(val friendId: String, val memberId: String) : Route(Icons.Default.People, MessageKey.FriendsTitle)
     data object BlockedEntities : Route(Icons.Default.Lock, MessageKey.SafetyBlockedEntities)
     data object CacheDetail : Route(Icons.Default.Tune, MessageKey.SettingsViewCache)
+    data object Draw : Route(Icons.Default.Edit, MessageKey.SettingsDraw)
     data class Chat(val systemId: String? = null) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
     data class ChatChannel(val channelId: String, val systemId: String? = null) : Route(Icons.AutoMirrored.Filled.Chat, MessageKey.ChatTitle)
 

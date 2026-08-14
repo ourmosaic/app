@@ -31,16 +31,49 @@ import kotlinx.coroutines.withContext
 import space.ourmosaic.app.auth.AuthService
 import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.i18n.MessageKey
+import space.ourmosaic.app.system.AppSettings
+import space.ourmosaic.app.system.SerializedOffset
+import space.ourmosaic.app.system.SerializedPath
 
 import space.ourmosaic.app.getPlatform
 
 @Composable
-fun DrawingDialog(i18n: I18nState, powProgress: Int, difficulty: Int? = null) {
-    var paths by remember { mutableStateOf(listOf<Path>()) }
-    var currentPath by remember { mutableStateOf<Path?>(null) }
+fun DrawingDialog(
+    i18n: I18nState, 
+    powProgress: Int, 
+    difficulty: Int? = null,
+    onDrawingChanged: (List<SerializedPath>) -> Unit = {}
+) {
+    var paths by remember { mutableStateOf(listOf<List<SerializedOffset>>()) }
+    var currentPath by remember { mutableStateOf<List<SerializedOffset>?>(null) }
     val platform = remember { getPlatform() }
     val showDifficulty = remember(platform.versionName) {
         platform.versionName.contains("-debug") || platform.versionName.contains("-beta")
+    }
+
+    val composePaths = remember(paths, currentPath) {
+        val list = mutableListOf<Path>()
+        paths.forEach { points ->
+            if (points.isNotEmpty()) {
+                val path = Path()
+                path.moveTo(points[0].x, points[0].y)
+                for (i in 1 until points.size) {
+                    path.lineTo(points[i].x, points[i].y)
+                }
+                list.add(path)
+            }
+        }
+        currentPath?.let { points ->
+            if (points.isNotEmpty()) {
+                val path = Path()
+                path.moveTo(points[0].x, points[0].y)
+                for (i in 1 until points.size) {
+                    path.lineTo(points[i].x, points[i].y)
+                }
+                list.add(path)
+            }
+        }
+        list
     }
 
     Dialog(
@@ -96,32 +129,24 @@ fun DrawingDialog(i18n: I18nState, powProgress: Int, difficulty: Int? = null) {
                             .pointerInput(Unit) {
                                 detectDragGestures(
                                     onDragStart = { offset ->
-                                        currentPath = Path().apply { moveTo(offset.x, offset.y) }
+                                        currentPath = listOf(SerializedOffset(offset.x, offset.y))
                                     },
                                     onDrag = { change, _ ->
                                         change.consume()
-                                        currentPath?.lineTo(change.position.x, change.position.y)
-                                        
-                                        // Force recomposition
-                                        val p = currentPath
-                                        currentPath = null
-                                        currentPath = p
+                                        currentPath = currentPath?.plus(SerializedOffset(change.position.x, change.position.y))
                                     },
                                     onDragEnd = {
-                                        currentPath?.let { paths = paths + it }
+                                        currentPath?.let { 
+                                            val newPaths = paths + listOf(it)
+                                            paths = newPaths
+                                            onDrawingChanged(newPaths.map { p -> SerializedPath(p) })
+                                        }
                                         currentPath = null
                                     }
                                 )
                             }
                     ) {
-                        paths.forEach { path ->
-                            drawPath(
-                                path = path,
-                                color = Color.Gray,
-                                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                        }
-                        currentPath?.let { path ->
+                        composePaths.forEach { path ->
                             drawPath(
                                 path = path,
                                 color = Color.Gray,
@@ -131,7 +156,10 @@ fun DrawingDialog(i18n: I18nState, powProgress: Int, difficulty: Int? = null) {
                     }
 
                     IconButton(
-                        onClick = { paths = emptyList() },
+                        onClick = { 
+                            paths = emptyList()
+                            onDrawingChanged(emptyList())
+                        },
                         modifier = Modifier.align(Alignment.TopEnd)
                     ) {
                         Icon(Icons.Default.Clear, contentDescription = i18n.text(MessageKey.PowEffacer))
@@ -160,6 +188,7 @@ fun DrawingDialog(i18n: I18nState, powProgress: Int, difficulty: Int? = null) {
 fun LoginScreen(
     i18n: I18nState,
     authService: AuthService,
+    appSettings: AppSettings,
     onLoginSuccess: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -174,9 +203,10 @@ fun LoginScreen(
     var powProgress by remember { mutableStateOf<Int?>(null) }
     var powDifficulty by remember { mutableStateOf<Int?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var currentDrawing by remember { mutableStateOf(listOf<SerializedPath>()) }
 
     if (isRegisterMode && powProgress != null) {
-        DrawingDialog(i18n, powProgress!!, powDifficulty)
+        DrawingDialog(i18n, powProgress!!, powDifficulty, onDrawingChanged = { currentDrawing = it })
     }
 
     Scaffold(
@@ -286,7 +316,11 @@ fun LoginScreen(
                                     }
                                     val powToken = verifyResult.getOrThrow()
                                     
-                                    authService.register(federation, username, email, password, powToken)
+                                    val regResult = authService.register(federation, username, email, password, powToken)
+                                    if (regResult.isSuccess) {
+                                        appSettings.drawingData = currentDrawing
+                                    }
+                                    regResult
                                 } else {
                                     authService.login(federation, username, password)
                                 }

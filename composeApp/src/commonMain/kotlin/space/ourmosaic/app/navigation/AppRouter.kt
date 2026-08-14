@@ -18,6 +18,7 @@ import space.ourmosaic.app.i18n.I18nState
 import space.ourmosaic.app.offline.OfflineManager
 import space.ourmosaic.app.screens.BlockedEntitiesScreen
 import space.ourmosaic.app.screens.CacheDetailScreen
+import space.ourmosaic.app.screens.DrawScreen
 import space.ourmosaic.app.screens.FriendSystemScreen
 import space.ourmosaic.app.screens.FriendMemberDetailScreen
 import space.ourmosaic.app.screens.FriendsScreen
@@ -85,6 +86,7 @@ fun AppRouter(
         Route.Login -> LoginScreen(
             i18n = i18n,
             authService = authService,
+            appSettings = appSettings,
             onLoginSuccess = { navState.navigateTo(Route.Home) }
         )
 
@@ -176,6 +178,12 @@ fun AppRouter(
             offlineManager = offlineManager,
             authService = authService,
             currentSystemId = currentSystemId
+        )
+
+        Route.Draw -> DrawScreen(
+            i18n = i18n,
+            appSettings = appSettings,
+            onBack = navState::back
         )
 
         is Route.Chat -> {

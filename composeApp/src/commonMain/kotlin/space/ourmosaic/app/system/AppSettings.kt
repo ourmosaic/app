@@ -5,6 +5,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class SerializedOffset(val x: Float, val y: Float)
+
+@Serializable
+data class SerializedPath(val points: List<SerializedOffset>)
 
 class AppSettings {
     private val settings = Settings()
@@ -13,6 +23,9 @@ class AppSettings {
     private val FRONT_NOTIF_KEY = "show_front_notification"
     private val HIDE_IN_FOLDERS_KEY = "hide_members_in_folders_at_root"
     private val SELECTED_SYSTEM_ID_KEY = "selected_system_id"
+    private val DRAWING_DATA_KEY = "drawing_data"
+
+    private val json = Json { ignoreUnknownKeys = true }
 
     private var _hideDormantMembers by mutableStateOf(settings.getBoolean(HIDE_DORMANT_KEY, false))
     var hideDormantMembers: Boolean
@@ -48,5 +61,20 @@ class AppSettings {
             } else {
                 settings[SELECTED_SYSTEM_ID_KEY] = value
             }
+        }
+
+    private var _drawingData by mutableStateOf(settings.getStringOrNull(DRAWING_DATA_KEY))
+    var drawingData: List<SerializedPath>
+        get() {
+            return try {
+                _drawingData?.let { json.decodeFromString<List<SerializedPath>>(it) } ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        set(value) {
+            val serialized = json.encodeToString(value)
+            _drawingData = serialized
+            settings[DRAWING_DATA_KEY] = serialized
         }
 }
