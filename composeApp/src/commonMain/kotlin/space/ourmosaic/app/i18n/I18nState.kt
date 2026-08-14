@@ -290,6 +290,9 @@ private val englishMessages = mapOf(
     MessageKey.PowDescription to "Checking that you're not a robot. Meanwhile, you can draw!",
     MessageKey.PowEffacer to "Clear",
     MessageKey.PowCalculEnCours to "Calculating: %s tries",
+    MessageKey.SettingsDraw to "Drawing",
+    MessageKey.DrawTitle to "Free Drawing",
+    MessageKey.DrawSave to "Save Drawing",
 )
 
 private val frenchMessages = mapOf(
@@ -513,4 +516,7 @@ private val frenchMessages = mapOf(
     MessageKey.PowDescription to "On vérifie que vous n'êtes pas un robot. Pendant ce temps, vous pouvez dessiner !",
     MessageKey.PowEffacer to "Effacer",
     MessageKey.PowCalculEnCours to "Calcul en cours : %s essais",
+    MessageKey.SettingsDraw to "Dessin",
+    MessageKey.DrawTitle to "Dessin libre",
+    MessageKey.DrawSave to "Enregistrer le dessin",
 )
